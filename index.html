@@ -609,7 +609,7 @@ const SUPABASE_URL = 'https://wmvnearoursbmwjqwzww.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let allCustomers = [], allPartners = [], allPrograms = [];
+let allCustomers = [], allPartners = [], allPrograms = [], balMap = {};
 let extendTargetId = null, currentUser = null;
 let isSuperAdmin = false, currentTeam = null;
 
@@ -709,6 +709,9 @@ async function doResetPassword() {
 async function loadAll() {
   await Promise.all([loadPrograms(), loadCustomers()]);
   if (isSuperAdmin) await loadPartners();
+  const bals = await loadBalances();
+  balMap = {};
+  bals.forEach(b => { balMap[b.account_no] = b; });
   renderDashboard(); renderExpiry(); renderStats();
 }
 
@@ -799,7 +802,7 @@ function renderDashboard() {
         <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
         <td><span class="prog-tag">${esc(c.progName)}</span></td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
-        <td style="color:var(--text2)">—</td>
+        <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">—</span>'}</td>
         <td style="font-size:12px">${fmtDate(c.expires_at)}</td>
         <td>${statusBadge(c.status)}</td>
       </tr>`).join('')
@@ -816,7 +819,9 @@ function renderCustomers(list) {
         <td class="tg-link">${esc(c.telegram_id)}</td>
         <td><span class="prog-tag">${esc(c.progName)}</span></td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
-        <td style="color:var(--text2)">—</td><td style="color:var(--text2)">—</td>
+        <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
+        <td style="color:${balMap[c.account_no]&&balMap[c.account_no].profit>=0?'var(--green)':'var(--red)'}">
+          ${balMap[c.account_no] ? (balMap[c.account_no].profit>=0?'+':'')+Number(balMap[c.account_no].profit).toFixed(2) : '—'}</td>
         <td style="font-size:12px">${fmtDate(c.expires_at)}</td>
         ${teamCell(c)}<td>${statusBadge(c.status)}</td>
         <td><div class="action-gap">
@@ -850,7 +855,7 @@ function renderExpiry() {
         <td class="tg-link">${esc(c.telegram_id)}</td>
         <td><span class="prog-tag">${esc(c.progName)}</span></td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
-        <td style="color:var(--text2)">—</td>
+        <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">—</span>'}</td>
         <td style="font-size:12px">${fmtDate(c.expires_at)}</td>
         <td>${dDay(c.daysLeft)}</td>
         <td><button class="btn-sm btn-sm-amber" onclick='openExtend("${esc(c.id)}","${esc(c.name)}","${fmtDate(c.expires_at)}")'>연장</button></td>
@@ -859,9 +864,6 @@ function renderExpiry() {
 }
 
 async function renderStats() {
-  const bals = await loadBalances();
-  const balMap = {};
-  bals.forEach(b => { balMap[b.account_no] = b; });
   let totalBal = 0, totalProfit = 0, lastUpdate = null;
   const rows = allCustomers.map(c => {
     const b = balMap[c.account_no];
