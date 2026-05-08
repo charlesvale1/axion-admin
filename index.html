@@ -572,18 +572,22 @@ tr:hover td { background: rgba(255,255,255,.025); }
   </div>
 </div>
 
-<!-- 프로그램 추가 모달 -->
+<!-- 프로그램 관리 모달 -->
 <div class="modal-bg hidden" id="addprog-modal">
   <div class="modal">
-    <div class="modal-title">EA 프로그램 추가</div>
+    <div class="modal-title">EA 프로그램 관리</div>
     <div id="addprog-info" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:14px;font-size:13px;color:var(--text2)"></div>
+    <div class="form-label" style="margin-bottom:8px">현재 보유 프로그램</div>
+    <div id="addprog-current" style="margin-bottom:16px;min-height:32px"></div>
     <div class="form-group">
-      <label class="form-label">추가할 프로그램</label>
-      <select class="form-input" id="addprog-select" style="margin:0"></select>
+      <label class="form-label">프로그램 추가</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-input" id="addprog-select" style="margin:0;flex:1"></select>
+        <button class="btn-primary" style="white-space:nowrap" onclick="addProgramToCustomer()">+ 추가</button>
+      </div>
     </div>
-    <div class="modal-btns">
-      <button class="btn-cancel" onclick="closeModals()">취소</button>
-      <button class="btn-primary" onclick="addProgramToCustomer()">추가 완료</button>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeModals()">닫기</button>
     </div>
   </div>
 </div>
@@ -835,12 +839,12 @@ function renderDashboard() {
     : '<tr><td colspan="7" class="empty">등록된 고객이 없습니다</td></tr>';
 }
 
-function progTags(customerId) {
+function progBadge(customerId, customerName) {
   const progs = customerPrograms[customerId] || [];
-  if (!progs.length) return '<span style="color:var(--text3);font-size:11px">없음</span>';
-  return progs.map(p =>
-    `<span class="prog-tag" style="cursor:pointer" onclick='removeProgram("${esc(customerId)}","${esc(p.id)}","${esc(p.name)}")'>${esc(p.name)} ✕</span>`
-  ).join(' ');
+  const label = progs.length === 0 ? '없음' : progs.length === 1 ? esc(progs[0].name) : `${esc(progs[0].name)} 외 ${progs.length - 1}개`;
+  const color = progs.length === 0 ? 'var(--text3)' : 'var(--blue)';
+  return `<span style="font-size:12px;color:${color};margin-right:4px">${label}</span>`
+       + `<button class="btn-sm" style="font-size:10px;padding:1px 6px" onclick='openManagePrograms("${esc(customerId)}","${esc(customerName)}")'>관리</button>`;
 }
 
 function renderCustomers(list) {
@@ -851,7 +855,7 @@ function renderCustomers(list) {
     ? list.map(c => `<tr>
         <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
         <td class="tg-link">${esc(c.telegram_id)}</td>
-        <td>${progTags(c.id)} <button class="btn-sm" style="font-size:10px;padding:1px 5px" onclick='openAddProgram("${esc(c.id)}","${esc(c.name)}")'>+추가</button></td>
+        <td>${progBadge(c.id, c.name)}</td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
         <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
         <td style="color:${balMap[c.account_no]&&balMap[c.account_no].profit>=0?'var(--green)':'var(--red)'}">
@@ -1051,19 +1055,34 @@ async function deletePartner(id) {
 /* ── 프로그램 추가/제거 ── */
 let addProgTargetId = null;
 
-function openAddProgram(customerId, customerName) {
+function openManagePrograms(customerId, customerName) {
   addProgTargetId = customerId;
   document.getElementById('addprog-info').innerHTML =
-    `<strong style="color:var(--text)">${esc(customerName)}</strong>에게 EA 프로그램 권한을 추가합니다.`;
-  const assigned = (customerPrograms[customerId] || []).map(p => p.id);
-  const available = allPrograms.filter(p => !assigned.includes(p.id));
-  if (!available.length) {
-    alert('추가할 수 있는 프로그램이 없습니다. 모든 프로그램이 이미 할당되어 있습니다.');
-    return;
-  }
-  document.getElementById('addprog-select').innerHTML =
-    available.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    `<strong style="color:var(--text)">${esc(customerName)}</strong>의 EA 프로그램 권한`;
+  refreshManageModal(customerId);
   document.getElementById('addprog-modal').classList.remove('hidden');
+}
+
+function refreshManageModal(customerId) {
+  const progs = customerPrograms[customerId] || [];
+  const currentEl = document.getElementById('addprog-current');
+  if (progs.length === 0) {
+    currentEl.innerHTML = '<span style="color:var(--text3);font-size:13px">할당된 프로그램 없음</span>';
+  } else {
+    currentEl.innerHTML = progs.map(p =>
+      `<span class="prog-tag" style="margin-right:6px;margin-bottom:4px;display:inline-flex;align-items:center;gap:4px">
+        ${esc(p.name)}
+        <span style="cursor:pointer;color:var(--red);font-weight:700" onclick='removeProgramInModal("${esc(customerId)}","${esc(p.id)}","${esc(p.name)}")'>✕</span>
+      </span>`
+    ).join('');
+  }
+  const assigned = progs.map(p => p.id);
+  const available = allPrograms.filter(p => !assigned.includes(p.id));
+  const sel = document.getElementById('addprog-select');
+  sel.innerHTML = available.length
+    ? available.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')
+    : '<option value="">추가 가능한 프로그램 없음</option>';
+  sel.disabled = !available.length;
 }
 
 async function addProgramToCustomer() {
@@ -1072,13 +1091,13 @@ async function addProgramToCustomer() {
   const { error } = await sb.from('customer_programs')
     .insert({ customer_id: addProgTargetId, program_id: programId });
   if (error) { alert(errMsg(error)); return; }
-  closeModals();
   showToast('프로그램이 추가되었습니다.');
   await loadCustomerPrograms();
   renderCustomers();
+  refreshManageModal(addProgTargetId);
 }
 
-async function removeProgram(customerId, programId, programName) {
+async function removeProgramInModal(customerId, programId, programName) {
   if (!confirm(`"${programName}" 권한을 제거하시겠습니까?`)) return;
   const { error } = await sb.from('customer_programs')
     .delete().eq('customer_id', customerId).eq('program_id', programId);
@@ -1086,6 +1105,7 @@ async function removeProgram(customerId, programId, programName) {
   showToast('프로그램이 제거되었습니다.');
   await loadCustomerPrograms();
   renderCustomers();
+  refreshManageModal(customerId);
 }
 
 /* ── UI ── */
