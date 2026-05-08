@@ -572,6 +572,22 @@ tr:hover td { background: rgba(255,255,255,.025); }
   </div>
 </div>
 
+<!-- 프로그램 추가 모달 -->
+<div class="modal-bg hidden" id="addprog-modal">
+  <div class="modal">
+    <div class="modal-title">EA 프로그램 추가</div>
+    <div id="addprog-info" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:14px;font-size:13px;color:var(--text2)"></div>
+    <div class="form-group">
+      <label class="form-label">추가할 프로그램</label>
+      <select class="form-input" id="addprog-select" style="margin:0"></select>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" onclick="addProgramToCustomer()">추가 완료</button>
+    </div>
+  </div>
+</div>
+
 <!-- 파트너 추가 모달 -->
 <div class="modal-bg hidden" id="partner-modal">
   <div class="modal">
@@ -609,7 +625,7 @@ const SUPABASE_URL = 'https://wmvnearoursbmwjqwzww.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let allCustomers = [], allPartners = [], allPrograms = [], balMap = {};
+let allCustomers = [], allPartners = [], allPrograms = [], balMap = {}, customerPrograms = {};
 let extendTargetId = null, currentUser = null;
 let isSuperAdmin = false, currentTeam = null;
 
@@ -708,6 +724,7 @@ async function doResetPassword() {
 /* ── DATA ── */
 async function loadAll() {
   await Promise.all([loadPrograms(), loadCustomers()]);
+  await loadCustomerPrograms();
   if (isSuperAdmin) await loadPartners();
   const bals = await loadBalances();
   balMap = {};
@@ -723,6 +740,15 @@ async function loadPrograms() {
   document.getElementById('filter-prog').innerHTML =
     '<option value="all">전체 프로그램</option>' +
     allPrograms.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+}
+
+async function loadCustomerPrograms() {
+  const { data } = await sb.from('customer_programs').select('customer_id, programs(id, name)');
+  customerPrograms = {};
+  (data || []).forEach(r => {
+    if (!customerPrograms[r.customer_id]) customerPrograms[r.customer_id] = [];
+    customerPrograms[r.customer_id].push(r.programs);
+  });
 }
 
 async function loadCustomers() {
@@ -809,6 +835,14 @@ function renderDashboard() {
     : '<tr><td colspan="7" class="empty">등록된 고객이 없습니다</td></tr>';
 }
 
+function progTags(customerId) {
+  const progs = customerPrograms[customerId] || [];
+  if (!progs.length) return '<span style="color:var(--text3);font-size:11px">없음</span>';
+  return progs.map(p =>
+    `<span class="prog-tag" style="cursor:pointer" onclick='removeProgram("${esc(customerId)}","${esc(p.id)}","${esc(p.name)}")'>${esc(p.name)} ✕</span>`
+  ).join(' ');
+}
+
 function renderCustomers(list) {
   list = list || allCustomers;
   const teamCell = c => isSuperAdmin ? `<td><span class="team-tag">${esc(c.team_name)}</span></td>` : '';
@@ -817,7 +851,7 @@ function renderCustomers(list) {
     ? list.map(c => `<tr>
         <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
         <td class="tg-link">${esc(c.telegram_id)}</td>
-        <td><span class="prog-tag">${esc(c.progName)}</span></td>
+        <td>${progTags(c.id)} <button class="btn-sm" style="font-size:10px;padding:1px 5px" onclick='openAddProgram("${esc(c.id)}","${esc(c.name)}")'>+추가</button></td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
         <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
         <td style="color:${balMap[c.account_no]&&balMap[c.account_no].profit>=0?'var(--green)':'var(--red)'}">
@@ -925,17 +959,23 @@ async function addCustomer() {
     is_active:     true,
   };
   if (!payload.name || !payload.account_no) { alert('이름과 계좌번호는 필수입니다.'); return; }
-  const { error } = await sb.from('customers').insert(payload);
+  const { data: newCust, error } = await sb.from('customers').insert(payload).select('id').single();
   if (error) { alert(errMsg(error)); return; }
+  if (newCust && payload.program_id) {
+    await sb.from('customer_programs').insert({ customer_id: newCust.id, program_id: payload.program_id });
+  }
   closeModals();
   showToast('고객이 등록되었습니다.');
-  await loadCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  await loadCustomers(); await loadCustomerPrograms(); renderDashboard(); renderExpiry(); renderStats();
 }
 
 function openExtend(id, name, expDate) {
   extendTargetId = id;
+  const c = allCustomers.find(x => x.id === id);
+  const progs = (customerPrograms[id] || []).map(p => p.name).join(', ');
   document.getElementById('extend-info').innerHTML =
-    `<strong style="color:var(--text)">${esc(name)}</strong><br>현재 만료일: ${expDate}`;
+    `<strong style="color:var(--text)">${esc(name)}</strong><br>현재 만료일: ${expDate}` +
+    (progs ? `<br>보유 프로그램: <span style="color:var(--blue)">${esc(progs)}</span>` : '');
   document.getElementById('extend-modal').classList.remove('hidden');
 }
 
@@ -1008,6 +1048,46 @@ async function deletePartner(id) {
   await loadPartners();
 }
 
+/* ── 프로그램 추가/제거 ── */
+let addProgTargetId = null;
+
+function openAddProgram(customerId, customerName) {
+  addProgTargetId = customerId;
+  document.getElementById('addprog-info').innerHTML =
+    `<strong style="color:var(--text)">${esc(customerName)}</strong>에게 EA 프로그램 권한을 추가합니다.`;
+  const assigned = (customerPrograms[customerId] || []).map(p => p.id);
+  const available = allPrograms.filter(p => !assigned.includes(p.id));
+  if (!available.length) {
+    alert('추가할 수 있는 프로그램이 없습니다. 모든 프로그램이 이미 할당되어 있습니다.');
+    return;
+  }
+  document.getElementById('addprog-select').innerHTML =
+    available.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  document.getElementById('addprog-modal').classList.remove('hidden');
+}
+
+async function addProgramToCustomer() {
+  const programId = document.getElementById('addprog-select').value;
+  if (!programId || !addProgTargetId) return;
+  const { error } = await sb.from('customer_programs')
+    .insert({ customer_id: addProgTargetId, program_id: programId });
+  if (error) { alert(errMsg(error)); return; }
+  closeModals();
+  showToast('프로그램이 추가되었습니다.');
+  await loadCustomerPrograms();
+  renderCustomers();
+}
+
+async function removeProgram(customerId, programId, programName) {
+  if (!confirm(`"${programName}" 권한을 제거하시겠습니까?`)) return;
+  const { error } = await sb.from('customer_programs')
+    .delete().eq('customer_id', customerId).eq('program_id', programId);
+  if (error) { alert(errMsg(error)); return; }
+  showToast('프로그램이 제거되었습니다.');
+  await loadCustomerPrograms();
+  renderCustomers();
+}
+
 /* ── UI ── */
 const pages = ['dashboard','customers','expiry','stats','partners'];
 const pageTitles = { dashboard:'대시보드', customers:'고객 관리', expiry:'만료 알림', stats:'수익 통계', partners:'파트너 관리' };
@@ -1038,7 +1118,7 @@ function openPartnerModal() {
   document.getElementById('partner-modal').classList.remove('hidden');
 }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','addprog-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
 }
 
