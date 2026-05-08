@@ -830,7 +830,7 @@ function renderDashboard() {
   document.getElementById('dash-table').innerHTML = recent.length
     ? recent.map(c => `<tr>
         <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
-        <td><span class="prog-tag">${esc(c.progName)}</span></td>
+        <td>${progNameTags(c.id)}</td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
         <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">—</span>'}</td>
         <td style="font-size:12px">${fmtDate(c.expires_at)}</td>
@@ -839,9 +839,15 @@ function renderDashboard() {
     : '<tr><td colspan="7" class="empty">등록된 고객이 없습니다</td></tr>';
 }
 
+function progNameTags(customerId) {
+  const progs = customerPrograms[customerId] || [];
+  if (!progs.length) return '<span style="color:var(--text3)">—</span>';
+  return progs.map(p => `<span class="prog-tag">${esc(p.name)}</span>`).join(' ');
+}
+
 function progBadge(customerId, customerName) {
   const progs = customerPrograms[customerId] || [];
-  const label = progs.length === 0 ? '없음' : progs.length === 1 ? esc(progs[0].name) : `${esc(progs[0].name)} 외 ${progs.length - 1}개`;
+  const label = progs.length === 0 ? '—' : progs.length === 1 ? esc(progs[0].name) : `${esc(progs[0].name)} 외 ${progs.length - 1}개`;
   const color = progs.length === 0 ? 'var(--text3)' : 'var(--blue)';
   return `<span style="font-size:12px;color:${color};margin-right:4px">${label}</span>`
        + `<button class="btn-sm" style="font-size:10px;padding:1px 6px" onclick='openManagePrograms("${esc(customerId)}","${esc(customerName)}")'>관리</button>`;
@@ -891,7 +897,7 @@ function renderExpiry() {
     ? list.map(c => `<tr>
         <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
         <td class="tg-link">${esc(c.telegram_id)}</td>
-        <td><span class="prog-tag">${esc(c.progName)}</span></td>
+        <td>${progNameTags(c.id)}</td>
         <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
         <td style="font-weight:600">${balMap[c.account_no] ? fmtMoney(balMap[c.account_no].balance) : '<span style="color:var(--text3)">—</span>'}</td>
         <td style="font-size:12px">${fmtDate(c.expires_at)}</td>
@@ -911,7 +917,7 @@ async function renderStats() {
     }
     return `<tr>
       <td>${esc(c.name)}</td><td class="mono">${esc(c.account_no)}</td>
-      <td><span class="prog-tag">${esc(c.progName)}</span></td>
+      <td>${progNameTags(c.id)}</td>
       <td style="color:var(--text2)">${esc(shortSrv(c.server_name))}</td>
       <td style="font-weight:600">${b ? fmtMoney(b.balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
       <td style="color:${b&&b.profit>=0?'var(--green)':'var(--red)'}">
