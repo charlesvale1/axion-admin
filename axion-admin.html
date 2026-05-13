@@ -855,6 +855,42 @@ tr:hover td { background: rgba(255,255,255,.012); }
   </div>
 </div>
 
+<!-- 고객 수정 모달 -->
+<div class="modal-bg hidden" id="edit-modal">
+  <div class="modal">
+    <div class="modal-title">고객 정보 수정</div>
+    <input type="hidden" id="edit-id" />
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">고객 이름</label>
+        <input class="form-input" id="edit-name" style="margin:0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">MT4 계좌번호</label>
+        <input class="form-input" id="edit-account" style="margin:0" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">텔레그램 아이디</label>
+      <input class="form-input" id="edit-telegram" placeholder="@username" style="margin:0" />
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">프로그램</label>
+        <select class="form-input" id="edit-program" style="margin:0"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">서버명</label>
+        <input class="form-input" id="edit-server" style="margin:0" />
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" onclick="saveEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1060,6 +1096,7 @@ function renderCustomers(list) {
     <td>${statusBadge(c.status)}</td>
     <td><div class="action-gap">
       <button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button>
+      <button class="btn-sm" onclick='openEdit("${c.id}")'>수정</button>
       <button class="btn-sm" onclick='toggleActive("${c.id}",${c.is_active})'>${c.is_active ? '정지' : '활성화'}</button>
       ${isSuperAdmin ? `<button class="btn-sm btn-sm-red" onclick='deleteCustomer("${c.id}")'>삭제</button>` : ''}
     </div></td>
@@ -1209,6 +1246,44 @@ async function toggleActive(id, cur) {
   renderDashboard(); renderExpiry();
 }
 
+function openEdit(id) {
+  const c = allCustomers.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('edit-id').value       = id;
+  document.getElementById('edit-name').value     = c.name || '';
+  document.getElementById('edit-account').value  = c.account_no || '';
+  document.getElementById('edit-telegram').value = c.telegram_id || '';
+  document.getElementById('edit-server').value   = c.server_name || '';
+
+  const progSel = document.getElementById('edit-program');
+  progSel.innerHTML = allPrograms.map(p =>
+    `<option value="${p.id}" ${c.program_id === p.id ? 'selected' : ''}>${p.name}</option>`
+  ).join('');
+
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+async function saveEdit() {
+  const id       = document.getElementById('edit-id').value;
+  const progSel  = document.getElementById('edit-program');
+  const progName = progSel.options[progSel.selectedIndex]?.text || '';
+  const payload  = {
+    name:         document.getElementById('edit-name').value.trim(),
+    account_no:   document.getElementById('edit-account').value.trim(),
+    telegram_id:  document.getElementById('edit-telegram').value.trim(),
+    program_id:   progSel.value || null,
+    program_name: progName,
+    server_name:  document.getElementById('edit-server').value.trim(),
+  };
+  if (!payload.name || !payload.account_no) { alert('이름과 계좌번호는 필수입니다.'); return; }
+  const { error } = await sb.from('customers').update(payload).eq('id', id);
+  if (error) { alert('오류: ' + error.message); return; }
+  closeModals();
+  showToast('수정되었습니다.');
+  await loadCustomers();
+  renderDashboard(); renderExpiry(); renderStats();
+}
+
 async function addPartner() {
   const team  = document.getElementById('p-team').value.trim();
   const email = document.getElementById('p-email').value.trim();
@@ -1250,7 +1325,7 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
 }
 
