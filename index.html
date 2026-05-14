@@ -769,7 +769,7 @@ async function loadAll() {
   const bals = await loadBalances();
   balMap = {};
   bals.forEach(b => { balMap[b.account_no] = b; });
-  renderDashboard(); renderExpiry(); renderStats();
+  renderDashboard(); renderCustomers(); renderExpiry(); renderStats();
 }
 
 async function loadPrograms() {
