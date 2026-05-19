@@ -1051,6 +1051,7 @@ function startApp() {
 async function loadAll() {
   await Promise.all([loadPrograms(), loadCustomers(), loadBalancesGlobal()]);
   if (isSuperAdmin) { await loadPartners(); await loadPartnerPrograms(); }
+  renderCustomers();   // balMap 준비된 후 렌더
   renderDashboard();
   renderExpiry();
   renderStats();
@@ -1115,7 +1116,7 @@ async function loadCustomers() {
       teams.map(t => `<option value="${t}">${t}</option>`).join('');
   }
 
-  renderCustomers();
+  // renderCustomers는 loadAll에서 balMap 로드 후 호출
 }
 
 async function loadPartners() {
@@ -1329,7 +1330,7 @@ async function addCustomer() {
   closeModals();
   showToast('고객이 등록되었습니다.');
   await loadCustomers();
-  renderDashboard(); renderExpiry(); renderStats();
+  renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
 }
 
 function openExtend(id, name, expDate) {
@@ -1351,7 +1352,7 @@ async function extendLicense() {
   closeModals();
   showToast('라이선스가 연장되었습니다.');
   await loadCustomers();
-  renderDashboard(); renderExpiry();
+  renderCustomers(); renderDashboard(); renderExpiry();
 }
 
 async function deleteCustomer(id) {
@@ -1360,7 +1361,7 @@ async function deleteCustomer(id) {
   await sb.from('customers').delete().eq('id', id);
   showToast('삭제되었습니다.');
   await loadCustomers();
-  renderDashboard(); renderExpiry(); renderStats();
+  renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
 }
 
 async function toggleActive(id, cur) {
@@ -1371,7 +1372,7 @@ async function toggleActive(id, cur) {
   if (error) { alert('오류: ' + error.message); return; }
   showToast(next ? '활성화되었습니다.' : 'EA가 정지되었습니다.');
   await loadCustomers();
-  renderDashboard(); renderExpiry();
+  renderCustomers(); renderDashboard(); renderExpiry();
 }
 
 function openEdit(id) {
@@ -1412,7 +1413,7 @@ async function saveEdit() {
   closeModals();
   showToast('수정되었습니다.');
   await loadCustomers();
-  renderDashboard(); renderExpiry(); renderStats();
+  renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
 }
 
 /* ── EA PROGRAM CRUD ── */
@@ -1432,10 +1433,17 @@ async function addProgram() {
 }
 
 async function deleteProgram(id, name) {
-  if (!confirm(`"${name}" 프로그램을 삭제하시겠습니까?\n이미 할당된 고객의 라이선스에는 영향이 없습니다.`)) return;
-  await sb.from('programs').delete().eq('id', id);
+  if (!confirm(`"${name}" 프로그램을 삭제하시겠습니까?\n해당 EA가 할당된 모든 고객 라이선스도 함께 해제됩니다.`)) return;
+  // customer_programs 먼저 삭제 (FK CASCADE가 없을 경우 대비)
+  await sb.from('customer_programs').delete().eq('program_id', id);
+  // partner_programs도 삭제
+  await sb.from('partner_programs').delete().eq('program_id', id);
+  const { error } = await sb.from('programs').delete().eq('id', id);
+  if (error) { alert('삭제 오류: ' + error.message + '\n\nSupabase → programs 테이블 RLS에 DELETE 정책이 있는지 확인하세요.'); return; }
   showToast('삭제되었습니다.');
   await loadPrograms();
+  await loadCustomers();
+  renderCustomers(); renderDashboard();
 }
 
 /* ── PARTNER PROGRAM ASSIGNMENT ── */
