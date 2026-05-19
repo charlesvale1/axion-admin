@@ -1433,19 +1433,16 @@ async function addProgram() {
 }
 
 async function deleteProgram(id, name) {
-  if (!confirm(`"${name}" 프로그램을 삭제하시겠습니까?\n해당 EA가 할당된 모든 고객 라이선스도 함께 해제됩니다.`)) return;
-  // 1. customers.program_id NULL 처리 (FK 제약 해제)
-  await sb.from('customers').update({ program_id: null, program_name: null }).eq('program_id', id);
-  // 2. customer_programs 삭제
+  if (!confirm(`"${name}" 프로그램을 삭제하시겠습니까?\n해당 EA가 할당된 고객 라이선스도 함께 해제됩니다.`)) return;
+  // DB CASCADE/SET NULL 설정 후엔 이 한 줄로 끝 (DB가 알아서 연관 데이터 처리)
+  // 혹시 CASCADE 미설정 환경 대비 앱 레벨 선처리
   await sb.from('customer_programs').delete().eq('program_id', id);
-  // 3. partner_programs 삭제
   await sb.from('partner_programs').delete().eq('program_id', id).catch(() => {});
-  // 4. program 삭제
+  await sb.from('customers').update({ program_id: null, program_name: null }).eq('program_id', id);
   const { error } = await sb.from('programs').delete().eq('id', id);
   if (error) { alert('삭제 오류: ' + error.message); return; }
   showToast('삭제되었습니다.');
-  await loadPrograms();
-  await loadCustomers();
+  await Promise.all([loadPrograms(), loadCustomers()]);
   renderCustomers(); renderDashboard();
 }
 
