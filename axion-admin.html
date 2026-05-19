@@ -8,24 +8,24 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
-  --bg:           #07080b;
-  --bg2:          #0c0e14;
-  --bg3:          #111420;
-  --bg4:          #161925;
-  --border:       #191d2a;
-  --border2:      #222840;
-  --text:         #dde1eb;
-  --text2:        #5c6480;
-  --text3:        #2e3448;
-  --purple:       #6d5bfa;
-  --purple-dim:   #0f0d2e;
-  --purple-light: #9b8ffc;
+  --bg:           #1c1f2e;
+  --bg2:          #252839;
+  --bg3:          #2e3248;
+  --bg4:          #363b55;
+  --border:       #3a3f58;
+  --border2:      #4a5070;
+  --text:         #f4f6fc;
+  --text2:        #b0b8d4;
+  --text3:        #7a84a8;
+  --purple:       #7c6dfa;
+  --purple-dim:   #1e1a4a;
+  --purple-light: #b0a6ff;
   --green:        #10b981;
-  --green-dim:    #041f12;
+  --green-dim:    #0a3326;
   --amber:        #f59e0b;
-  --amber-dim:    #1f1200;
+  --amber-dim:    #2d1e00;
   --red:          #ef4444;
-  --red-dim:      #1a0404;
+  --red-dim:      #2d0a0a;
   --radius:       6px;
   --radius-lg:    10px;
   --font:         'Inter', -apple-system, sans-serif;
@@ -35,7 +35,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 14px;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
@@ -175,10 +175,10 @@ select.form-input { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 20px;
+  padding: 10px 20px;
   cursor: pointer;
   color: var(--text2);
-  font-size: 11.5px;
+  font-size: 13px;
   border-left: 2px solid transparent;
   transition: all .12s;
   font-weight: 400;
@@ -238,11 +238,11 @@ select.form-input { cursor: pointer; }
 .topbar-left { display: flex; align-items: center; gap: 8px; }
 .topbar-dot { width: 4px; height: 4px; background: var(--purple); border-radius: 50%; }
 .topbar-title {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: .12em;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .06em;
   text-transform: uppercase;
-  color: var(--text2);
+  color: var(--text);
 }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .alert-pill {
@@ -288,10 +288,10 @@ select.form-input { cursor: pointer; }
   overflow: hidden;
 }
 .mc-label {
-  font-size: 8px;
-  color: var(--text3);
+  font-size: 10px;
+  color: var(--text2);
   text-transform: uppercase;
-  letter-spacing: .14em;
+  letter-spacing: .10em;
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -299,8 +299,8 @@ select.form-input { cursor: pointer; }
   font-weight: 600;
 }
 .mc-label::before { content: '•'; color: var(--purple); font-size: 14px; line-height: 0; position: relative; top: 1px; }
-.mc-val { font-size: 30px; font-weight: 700; line-height: 1; letter-spacing: -.03em; }
-.mc-sub { font-size: 9px; color: var(--text3); margin-top: 7px; letter-spacing: .04em; }
+.mc-val { font-size: 32px; font-weight: 700; line-height: 1; letter-spacing: -.03em; }
+.mc-sub { font-size: 11px; color: var(--text2); margin-top: 7px; letter-spacing: .02em; }
 .c-green { color: var(--green); }
 .c-amber { color: var(--amber); }
 .c-purple { color: var(--purple-light); }
@@ -309,11 +309,11 @@ select.form-input { cursor: pointer; }
 /* ── SECTION ── */
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .section-title {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: .14em;
+  letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--text2);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -354,18 +354,18 @@ select.form-input { cursor: pointer; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th {
   background: var(--bg3);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text3);
-  padding: 10px 12px;
+  color: var(--text2);
+  padding: 11px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   text-transform: uppercase;
-  letter-spacing: .12em;
+  letter-spacing: .06em;
 }
 td {
-  padding: 10px 12px;
-  font-size: 12px;
+  padding: 11px 12px;
+  font-size: 13px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   vertical-align: middle;
@@ -479,12 +479,12 @@ tr:hover td { background: rgba(255,255,255,.012); }
   max-width: 95vw;
 }
 .modal-title {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
   margin-bottom: 22px;
-  letter-spacing: .14em;
+  letter-spacing: .06em;
   text-transform: uppercase;
-  color: var(--text2);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -528,8 +528,8 @@ tr:hover td { background: rgba(255,255,255,.012); }
 
 /* ── UTILS ── */
 .hidden { display: none !important; }
-.loading { color: var(--text3); font-size: 11px; padding: 36px; text-align: center; letter-spacing: .08em; text-transform: uppercase; }
-.empty { color: var(--text3); font-size: 11px; padding: 44px; text-align: center; letter-spacing: .06em; }
+.loading { color: var(--text2); font-size: 13px; padding: 36px; text-align: center; letter-spacing: .04em; }
+.empty { color: var(--text2); font-size: 13px; padding: 44px; text-align: center; letter-spacing: .02em; }
 .page { display: none; }
 .page.active { display: block; }
 </style>
@@ -582,6 +582,9 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <!-- 총관리자 전용 메뉴 -->
         <div class="nav-item hidden" id="nav-partners" onclick="showPage('partners')">
           <span class="nav-icon">◈</span> 파트너 관리
+        </div>
+        <div class="nav-item hidden" id="nav-programs" onclick="showPage('programs')">
+          <span class="nav-icon">▦</span> EA 프로그램
         </div>
       </div>
       <div class="sidebar-footer">
@@ -746,6 +749,24 @@ tr:hover td { background: rgba(255,255,255,.012); }
           </div>
         </div>
 
+        <!-- PROGRAMS (총관리자 전용) -->
+        <div class="page hidden" id="page-programs">
+          <div class="section-header">
+            <div class="section-title">EA 프로그램 목록</div>
+            <button class="btn-primary" onclick="openAddProgramModal()">+ EA 추가</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th style="width:260px">프로그램 이름 (EA 내부 이름과 동일하게)</th>
+                <th style="width:130px">등록일</th>
+                <th style="width:80px">액션</th>
+              </tr></thead>
+              <tbody id="programs-table"><tr><td colspan="3" class="loading">불러오는 중</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- PARTNERS (총관리자 전용) -->
         <div class="page hidden" id="page-partners">
           <div class="section-header">
@@ -755,11 +776,12 @@ tr:hover td { background: rgba(255,255,255,.012); }
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th style="width:130px">팀 이름</th>
-                <th style="width:200px">이메일</th>
-                <th style="width:90px">담당 고객</th>
-                <th style="width:110px">등록일</th>
-                <th style="width:80px">액션</th>
+                <th style="width:120px">팀 이름</th>
+                <th style="width:170px">이메일</th>
+                <th style="width:80px">담당 고객</th>
+                <th style="width:140px">허용 EA</th>
+                <th style="width:100px">등록일</th>
+                <th style="width:110px">액션</th>
               </tr></thead>
               <tbody id="partners-table"><tr><td colspan="5" class="loading">불러오는 중</td></tr></tbody>
             </table>
@@ -806,6 +828,8 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <option value="2" selected>2개월</option>
         <option value="3">3개월</option>
         <option value="6">6개월</option>
+        <option value="12">1년</option>
+        <option value="1200">무기한 (테스트/관리자용)</option>
       </select>
     </div>
     <div class="modal-btns">
@@ -848,9 +872,45 @@ tr:hover td { background: rgba(255,255,255,.012); }
       <label class="form-label">이메일</label>
       <input class="form-input" id="p-email" placeholder="partner@example.com" style="margin:0" />
     </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">초기 비밀번호</label>
+      <input class="form-input" type="password" id="p-pw" placeholder="8자 이상" style="margin:0" />
+      <div style="font-size:10px;color:var(--text3);margin-top:5px">파트너가 첫 로그인 후 변경하도록 안내하세요.</div>
+    </div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closeModals()">취소</button>
       <button class="btn-primary" onclick="addPartner()">추가 완료</button>
+    </div>
+  </div>
+</div>
+
+<!-- EA 프로그램 추가 모달 -->
+<div class="modal-bg hidden" id="addprogram-modal">
+  <div class="modal">
+    <div class="modal-title">EA 프로그램 추가</div>
+    <div class="form-group">
+      <label class="form-label">프로그램 이름</label>
+      <input class="form-input" id="np-name" placeholder="예: gold_ea 또는 MachineGun AXION v2" style="margin:0" />
+      <div style="font-size:10px;color:var(--text3);margin-top:5px">EA 파일의 EA_PROGRAM_NAME 값과 정확히 일치해야 합니다.</div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" onclick="addProgram()">추가</button>
+    </div>
+  </div>
+</div>
+
+<!-- 파트너 EA 할당 모달 -->
+<div class="modal-bg hidden" id="partner-prog-modal">
+  <div class="modal" style="width:480px;max-width:96vw">
+    <div class="modal-title">파트너 EA 할당</div>
+    <input type="hidden" id="pp-partner-id" />
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px" id="pp-partner-name"></div>
+    <div style="font-size:10px;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em">허용할 EA를 선택하세요</div>
+    <div id="pp-program-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" onclick="savePartnerPrograms()">저장</button>
     </div>
   </div>
 </div>
@@ -903,13 +963,17 @@ const SUPABASE_URL = 'https://wmvnearoursbmwjqwzww.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let allCustomers = [];
-let allPartners  = [];
-let allPrograms  = [];
-let extendTargetId = null;
-let currentUser    = null;
-let isSuperAdmin   = false;
-let currentTeam    = null;
+let allCustomers      = [];
+let allPartners       = [];
+let allPrograms       = [];
+let balMap            = {};         // account_no -> balance row
+let partnerProgMap    = {};         // partner_id -> [program_id, ...]
+let myAllowedProgIds  = null;       // null = 슈퍼어드민 (전체 허용)
+let extendTargetId    = null;
+let currentUser       = null;
+let isSuperAdmin      = false;
+let currentTeam       = null;
+let currentPartnerId  = null;
 
 /* ── AUTH ── */
 async function doLogin() {
@@ -942,13 +1006,22 @@ async function initApp() {
   if (!isSuperAdmin) {
     /* 파트너 테이블에서 팀 이름 조회 */
     const { data: pd, error } = await sb.from('partners')
-      .select('team_name').eq('email', currentUser.email).single();
+      .select('id,team_name').eq('email', currentUser.email).single();
     if (error || !pd) {
       alert('등록되지 않은 파트너 계정입니다.\n총 관리자에게 문의하세요.');
       await sb.auth.signOut();
       return;
     }
-    currentTeam = pd.team_name;
+    currentTeam     = pd.team_name;
+    currentPartnerId = pd.id;
+    /* 파트너에게 허용된 EA 로드 (테이블 없으면 전체 허용) */
+    try {
+      const { data: ppd, error: ppErr } = await sb.from('partner_programs')
+        .select('program_id').eq('partner_id', pd.id);
+      if (!ppErr && ppd && ppd.length > 0) {
+        myAllowedProgIds = ppd.map(r => r.program_id);
+      }
+    } catch(e) { /* 테이블 미생성 시 전체 허용 */ }
   }
 
   startApp();
@@ -963,6 +1036,8 @@ function startApp() {
   if (isSuperAdmin) {
     document.getElementById('nav-partners').classList.remove('hidden');
     document.getElementById('page-partners').classList.remove('hidden');
+    document.getElementById('nav-programs').classList.remove('hidden');
+    document.getElementById('page-programs').classList.remove('hidden');
     document.getElementById('filter-team').classList.remove('hidden');
     document.getElementById('th-team').classList.remove('hidden');
   }
@@ -974,21 +1049,47 @@ function startApp() {
 
 /* ── DATA LOADING ── */
 async function loadAll() {
-  await Promise.all([loadPrograms(), loadCustomers()]);
-  if (isSuperAdmin) await loadPartners();
+  await Promise.all([loadPrograms(), loadCustomers(), loadBalancesGlobal()]);
+  if (isSuperAdmin) { await loadPartners(); await loadPartnerPrograms(); }
   renderDashboard();
   renderExpiry();
   renderStats();
 }
 
+async function loadBalancesGlobal() {
+  const { data } = await sb.from('latest_balances').select('*');
+  balMap = {};
+  (data || []).forEach(b => { balMap[b.account_no] = b; });
+}
+
+async function loadPartnerPrograms() {
+  try {
+    const { data, error } = await sb.from('partner_programs').select('partner_id,program_id');
+    if (error) return; // 테이블 없을 때 조용히 스킵
+    partnerProgMap = {};
+    (data || []).forEach(r => {
+      if (!partnerProgMap[r.partner_id]) partnerProgMap[r.partner_id] = [];
+      partnerProgMap[r.partner_id].push(r.program_id);
+    });
+  } catch(e) { /* 테이블 미생성 시 무시 */ }
+}
+
 async function loadPrograms() {
   const { data } = await sb.from('programs').select('*').order('name');
   allPrograms = data || [];
+  /* 파트너는 허용된 EA만 표시 */
+  const visible = (myAllowedProgIds && !isSuperAdmin)
+    ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
+    : allPrograms;
   const sel  = document.getElementById('f-program');
-  sel.innerHTML = allPrograms.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  sel.innerHTML = visible.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
   const fsel = document.getElementById('filter-prog');
   fsel.innerHTML = '<option value="all">전체 프로그램</option>' +
-    allPrograms.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    visible.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  /* 수정 모달도 동일하게 */
+  const esel = document.getElementById('edit-program');
+  if (esel) esel.innerHTML = visible.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  if (isSuperAdmin) renderPrograms();
 }
 
 async function loadCustomers() {
@@ -1023,10 +1124,6 @@ async function loadPartners() {
   renderPartners();
 }
 
-async function loadBalances() {
-  const { data } = await sb.from('latest_balances').select('*');
-  return data || [];
-}
 
 /* ── RENDER HELPERS ── */
 function statusBadge(s) {
@@ -1067,15 +1164,18 @@ function renderDashboard() {
   }
 
   const recent = allCustomers.slice(0, 8);
-  document.getElementById('dash-table').innerHTML = recent.length ? recent.map(c => `<tr>
-    <td>${c.name}</td>
-    <td class="mono">${c.account_no}</td>
-    <td><span class="prog-tag">${c.progName}</span></td>
-    <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
-    <td style="color:var(--text2)">—</td>
-    <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
-    <td>${statusBadge(c.status)}</td>
-  </tr>`).join('') : '<tr><td colspan="7" class="empty">등록된 고객이 없습니다</td></tr>';
+  document.getElementById('dash-table').innerHTML = recent.length ? recent.map(c => {
+    const b = balMap[c.account_no];
+    return `<tr>
+      <td>${c.name}</td>
+      <td class="mono">${c.account_no}</td>
+      <td><span class="prog-tag">${c.progName}</span></td>
+      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
+      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
+      <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
+      <td>${statusBadge(c.status)}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="7" class="empty">등록된 고객이 없습니다</td></tr>';
 }
 
 function renderCustomers(list) {
@@ -1083,24 +1183,29 @@ function renderCustomers(list) {
   const teamCol = isSuperAdmin ? c => `<td><span class="team-tag">${c.team_name || '—'}</span></td>` : () => '';
   const colSpan = isSuperAdmin ? 12 : 11;
 
-  document.getElementById('customers-table').innerHTML = list.length ? list.map(c => `<tr>
-    <td>${c.name}</td>
-    <td class="mono">${c.account_no}</td>
-    <td class="tg-link">${c.telegram_id || '—'}</td>
-    <td><span class="prog-tag">${c.progName}</span></td>
-    <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
-    <td style="color:var(--text2)">—</td>
-    <td style="color:var(--text2)">—</td>
-    <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
-    ${teamCol(c)}
-    <td>${statusBadge(c.status)}</td>
-    <td><div class="action-gap">
-      <button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button>
-      <button class="btn-sm" onclick='openEdit("${c.id}")'>수정</button>
-      <button class="btn-sm" onclick='toggleActive("${c.id}",${c.is_active})'>${c.is_active ? '정지' : '활성화'}</button>
-      ${isSuperAdmin ? `<button class="btn-sm btn-sm-red" onclick='deleteCustomer("${c.id}")'>삭제</button>` : ''}
-    </div></td>
-  </tr>`).join('') : `<tr><td colspan="${colSpan}" class="empty">고객이 없습니다</td></tr>`;
+  document.getElementById('customers-table').innerHTML = list.length ? list.map(c => {
+    const b = balMap[c.account_no];
+    const balTd   = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>`;
+    const profitTd = `<td style="font-size:12px;color:${b ? (b.profit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
+      ${b ? (b.profit >= 0 ? '+' : '') + Number(b.profit).toFixed(2) : '—'}</td>`;
+    return `<tr>
+      <td>${c.name}</td>
+      <td class="mono">${c.account_no}</td>
+      <td class="tg-link">${c.telegram_id || '—'}</td>
+      <td><span class="prog-tag">${c.progName}</span></td>
+      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
+      ${balTd}${profitTd}
+      <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
+      ${teamCol(c)}
+      <td>${statusBadge(c.status)}</td>
+      <td><div class="action-gap">
+        <button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button>
+        <button class="btn-sm" onclick='openEdit("${c.id}")'>수정</button>
+        <button class="btn-sm" onclick='toggleActive("${c.id}",${c.is_active})'>${c.is_active ? '정지' : '활성화'}</button>
+        ${isSuperAdmin ? `<button class="btn-sm btn-sm-red" onclick='deleteCustomer("${c.id}")'>삭제</button>` : ''}
+      </div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="${colSpan}" class="empty">고객이 없습니다</td></tr>`;
 }
 
 function filterCustomers() {
@@ -1120,23 +1225,23 @@ function filterCustomers() {
 
 function renderExpiry() {
   const list = allCustomers.filter(c => c.status === 'warn' || c.status === 'expired');
-  document.getElementById('expiry-table').innerHTML = list.length ? list.map(c => `<tr>
-    <td>${c.name}</td>
-    <td class="mono">${c.account_no}</td>
-    <td class="tg-link">${c.telegram_id || '—'}</td>
-    <td><span class="prog-tag">${c.progName}</span></td>
-    <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
-    <td style="color:var(--text2)">—</td>
-    <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
-    <td>${dDay(c.daysLeft)}</td>
-    <td><button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button></td>
-  </tr>`).join('') : '<tr><td colspan="9" class="empty">만료 임박 고객이 없습니다</td></tr>';
+  document.getElementById('expiry-table').innerHTML = list.length ? list.map(c => {
+    const b = balMap[c.account_no];
+    return `<tr>
+      <td>${c.name}</td>
+      <td class="mono">${c.account_no}</td>
+      <td class="tg-link">${c.telegram_id || '—'}</td>
+      <td><span class="prog-tag">${c.progName}</span></td>
+      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
+      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
+      <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
+      <td>${dDay(c.daysLeft)}</td>
+      <td><button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="9" class="empty">만료 임박 고객이 없습니다</td></tr>';
 }
 
 async function renderStats() {
-  const bals   = await loadBalances();
-  const balMap = {};
-  bals.forEach(b => { balMap[b.account_no] = b; });
   let totalBal = 0, totalProfit = 0, lastUpdate = null;
   const rows = allCustomers.map(c => {
     const b = balMap[c.account_no];
@@ -1167,13 +1272,36 @@ async function renderStats() {
 function renderPartners() {
   const counts = {};
   allCustomers.forEach(c => { if (c.team_name) counts[c.team_name] = (counts[c.team_name] || 0) + 1; });
-  document.getElementById('partners-table').innerHTML = allPartners.length ? allPartners.map(p => `<tr>
-    <td style="font-weight:600">${p.team_name}</td>
-    <td style="color:var(--text2)">${p.email}</td>
-    <td>${counts[p.team_name] || 0}명</td>
-    <td style="font-size:11px;color:var(--text3)">${fmtDate(p.created_at)}</td>
-    <td><button class="btn-sm btn-sm-red" onclick='deletePartner("${p.id}")'>삭제</button></td>
-  </tr>`).join('') : '<tr><td colspan="5" class="empty">등록된 파트너가 없습니다</td></tr>';
+  document.getElementById('partners-table').innerHTML = allPartners.length ? allPartners.map(p => {
+    const progIds = partnerProgMap[p.id] || [];
+    const progTags = progIds.length
+      ? progIds.map(id => {
+          const pr = allPrograms.find(x => x.id === id);
+          return pr ? `<span class="prog-tag" style="font-size:9px">${pr.name}</span>` : '';
+        }).join(' ')
+      : '<span style="color:var(--text3);font-size:10px">전체 허용</span>';
+    return `<tr>
+      <td style="font-weight:600">${p.team_name}</td>
+      <td style="color:var(--text2)">${p.email}</td>
+      <td>${counts[p.team_name] || 0}명</td>
+      <td style="max-width:140px">${progTags}</td>
+      <td style="font-size:11px;color:var(--text3)">${fmtDate(p.created_at)}</td>
+      <td><div class="action-gap">
+        <button class="btn-sm" onclick='openAssignPrograms("${p.id}","${p.team_name}")'>EA 할당</button>
+        <button class="btn-sm btn-sm-red" onclick='deletePartner("${p.id}")'>삭제</button>
+      </div></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">등록된 파트너가 없습니다</td></tr>';
+}
+
+function renderPrograms() {
+  document.getElementById('programs-table').innerHTML = allPrograms.length
+    ? allPrograms.map(p => `<tr>
+        <td style="font-weight:500">${p.name}</td>
+        <td style="font-size:11px;color:var(--text3)">${fmtDate(p.created_at)}</td>
+        <td><button class="btn-sm btn-sm-red" onclick='deleteProgram("${p.id}","${p.name}")'>삭제</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="3" class="empty">등록된 EA가 없습니다</td></tr>';
 }
 
 /* ── ACTIONS ── */
@@ -1255,8 +1383,11 @@ function openEdit(id) {
   document.getElementById('edit-telegram').value = c.telegram_id || '';
   document.getElementById('edit-server').value   = c.server_name || '';
 
+  const visible = (myAllowedProgIds && !isSuperAdmin)
+    ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
+    : allPrograms;
   const progSel = document.getElementById('edit-program');
-  progSel.innerHTML = allPrograms.map(p =>
+  progSel.innerHTML = visible.map(p =>
     `<option value="${p.id}" ${c.program_id === p.id ? 'selected' : ''}>${p.name}</option>`
   ).join('');
 
@@ -1284,14 +1415,84 @@ async function saveEdit() {
   renderDashboard(); renderExpiry(); renderStats();
 }
 
+/* ── EA PROGRAM CRUD ── */
+function openAddProgramModal() {
+  document.getElementById('np-name').value = '';
+  document.getElementById('addprogram-modal').classList.remove('hidden');
+}
+
+async function addProgram() {
+  const name = document.getElementById('np-name').value.trim();
+  if (!name) { alert('프로그램 이름을 입력하세요.'); return; }
+  const { error } = await sb.from('programs').insert({ name });
+  if (error) { alert('오류: ' + error.message); return; }
+  closeModals();
+  showToast('EA 프로그램이 추가되었습니다.');
+  await loadPrograms();
+}
+
+async function deleteProgram(id, name) {
+  if (!confirm(`"${name}" 프로그램을 삭제하시겠습니까?\n이미 할당된 고객의 라이선스에는 영향이 없습니다.`)) return;
+  await sb.from('programs').delete().eq('id', id);
+  showToast('삭제되었습니다.');
+  await loadPrograms();
+}
+
+/* ── PARTNER PROGRAM ASSIGNMENT ── */
+function openAssignPrograms(partnerId, teamName) {
+  document.getElementById('pp-partner-id').value = partnerId;
+  document.getElementById('pp-partner-name').textContent = teamName + ' 파트너에게 허용할 EA를 선택하세요';
+  const assigned = partnerProgMap[partnerId] || [];
+  const list = document.getElementById('pp-program-list');
+  list.innerHTML = allPrograms.map(p => {
+    const checked = assigned.includes(p.id);
+    return `<label style="display:flex;align-items:center;gap:7px;background:${checked ? 'rgba(109,91,250,.15)' : 'var(--bg3)'};
+      border:1px solid ${checked ? 'var(--purple)' : 'var(--border)'};padding:7px 12px;border-radius:5px;cursor:pointer;font-size:12px">
+      <input type="checkbox" value="${p.id}" ${checked ? 'checked' : ''} style="accent-color:var(--purple)">
+      ${p.name}
+    </label>`;
+  }).join('');
+  document.getElementById('partner-prog-modal').classList.remove('hidden');
+}
+
+async function savePartnerPrograms() {
+  const partnerId = document.getElementById('pp-partner-id').value;
+  const checks    = document.querySelectorAll('#pp-program-list input[type=checkbox]');
+  const selected  = Array.from(checks).filter(c => c.checked).map(c => c.value);
+
+  /* 기존 항목 삭제 후 재삽입 */
+  await sb.from('partner_programs').delete().eq('partner_id', partnerId);
+  if (selected.length > 0) {
+    const rows = selected.map(pid => ({ partner_id: partnerId, program_id: pid }));
+    const { error } = await sb.from('partner_programs').insert(rows);
+    if (error) { alert('저장 오류: ' + error.message); return; }
+  }
+  closeModals();
+  showToast('EA 할당이 저장되었습니다.');
+  await loadPartnerPrograms();
+  renderPartners();
+}
+
 async function addPartner() {
   const team  = document.getElementById('p-team').value.trim();
   const email = document.getElementById('p-email').value.trim();
+  const pw    = document.getElementById('p-pw').value;
   if (!team || !email) { alert('팀 이름과 이메일을 입력하세요.'); return; }
+  if (!pw || pw.length < 8) { alert('비밀번호는 8자 이상이어야 합니다.'); return; }
+
+  /* Supabase Auth에 계정 생성 (admin API — service_role 없이는 signUp 사용) */
+  const { error: authErr } = await sb.auth.signUp({ email, password: pw });
+  if (authErr && !authErr.message.includes('already registered')) {
+    alert('계정 생성 오류: ' + authErr.message); return;
+  }
+
   const { error } = await sb.from('partners').insert({ team_name: team, email });
-  if (error) { alert('오류: ' + error.message); return; }
+  if (error) { alert('파트너 등록 오류: ' + error.message); return; }
   closeModals();
-  showToast('파트너가 추가되었습니다.');
+  document.getElementById('p-team').value = '';
+  document.getElementById('p-email').value = '';
+  document.getElementById('p-pw').value = '';
+  showToast('파트너가 추가되었습니다. 이메일 인증 없이 바로 로그인 가능합니다.');
   await loadPartners();
 }
 
@@ -1303,13 +1504,14 @@ async function deletePartner(id) {
 }
 
 /* ── UI ── */
-const pages = ['dashboard','customers','expiry','stats','partners'];
+const pages = ['dashboard','customers','expiry','stats','partners','programs'];
 const pageTitles = {
   dashboard: '대시보드',
   customers: '고객 관리',
   expiry:    '만료 알림',
   stats:     '수익 통계',
-  partners:  '파트너 관리'
+  partners:  '파트너 관리',
+  programs:  'EA 프로그램 관리'
 };
 
 function showPage(id) {
@@ -1325,7 +1527,7 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal','edit-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
 }
 
