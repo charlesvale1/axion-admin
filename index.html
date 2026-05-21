@@ -1402,9 +1402,9 @@ async function addCustomer() {
     await sb.from('customer_programs').insert({ customer_id: inserted.id, program_id: payload.program_id }).catch(() => {});
   }
   closeModals();
-  showToast('고객이 등록되었습니다.');
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  await showAlert(`${payload.name} 고객이 등록되었습니다!`, '✅');
 }
 
 function openExtend(id, name, expDate) {
@@ -1424,9 +1424,9 @@ async function extendLicense() {
     .update({ expires_at: base.toISOString(), is_active: true }).eq('id', extendTargetId);
   if (error) { await showAlert('연장 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
   closeModals();
-  showToast('라이선스가 연장되었습니다.');
   await loadCustomers();
   renderCustomers(); renderDashboard(); renderExpiry();
+  await showAlert('라이선스가 연장되었습니다.', '✅');
 }
 
 async function deleteCustomer(id) {
@@ -1487,9 +1487,9 @@ async function saveEdit() {
   const { error } = await sb.from('customers').update(payload).eq('id', id);
   if (error) { await showAlert('수정 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
   closeModals();
-  showToast('고객 정보가 수정되었습니다.');
   await loadCustomers();
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  await showAlert('고객 정보가 수정되었습니다.', '✅');
 }
 
 /* ── 고객 EA 관리 ── */
@@ -1662,7 +1662,7 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal','alert-modal','confirm-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
 }
 
