@@ -1363,15 +1363,16 @@ async function addCustomer() {
     is_active:     true
   };
   if (!payload.name || !payload.account_no) { alert('이름과 계좌번호는 필수입니다.'); return; }
-  const { data: inserted, error } = await sb.from('customers').insert(payload).select('id').single();
-  if (error) {
-    if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
-      alert('이미 등록된 계좌번호입니다.\n\n같은 계좌에 EA를 추가하려면\n고객 관리 → 해당 고객 → [관리] 버튼을 사용하세요.');
-    } else {
-      alert('오류: ' + error.message);
-    }
+
+  // 중복 계좌 사전 체크
+  const { data: existing } = await sb.from('customers').select('id,name').eq('account_no', payload.account_no).maybeSingle();
+  if (existing) {
+    alert(`이미 등록된 계좌번호입니다.\n등록된 고객명: ${existing.name}\n\nEA 추가는 고객 관리 → [관리] 버튼을 사용하세요.`);
     return;
   }
+
+  const { data: inserted, error } = await sb.from('customers').insert(payload).select('id').single();
+  if (error) { alert('오류: ' + error.message); return; }
   // customer_programs에도 추가 (다중 EA 지원)
   if (inserted?.id && payload.program_id) {
     await sb.from('customer_programs').insert({ customer_id: inserted.id, program_id: payload.program_id }).catch(() => {});
