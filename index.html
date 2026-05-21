@@ -884,6 +884,25 @@ tr:hover td { background: rgba(255,255,255,.012); }
   </div>
 </div>
 
+<!-- 고객 EA 관리 모달 -->
+<div class="modal-bg hidden" id="manage-ea-modal">
+  <div class="modal" style="width:460px;max-width:96vw">
+    <div class="modal-title">EA 관리</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:6px" id="mea-customer-name"></div>
+    <input type="hidden" id="mea-customer-id" />
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">현재 할당된 EA</div>
+    <div id="mea-current-list" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;margin-bottom:16px"></div>
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">EA 추가</div>
+    <div style="display:flex;gap:8px">
+      <select class="form-input" id="mea-add-select" style="margin:0;flex:1"></select>
+      <button class="btn-primary" onclick="addEAToCustomer()" style="white-space:nowrap">+ 추가</button>
+    </div>
+    <div class="modal-btns" style="margin-top:18px">
+      <button class="btn-cancel" onclick="closeModals()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- EA 프로그램 추가 모달 -->
 <div class="modal-bg hidden" id="addprogram-modal">
   <div class="modal">
@@ -968,6 +987,7 @@ let allPartners       = [];
 let allPrograms       = [];
 let balMap            = {};         // account_no -> balance row
 let partnerProgMap    = {};         // partner_id -> [program_id, ...]
+let customerPrograms  = {};         // customer_id -> [{id, name}, ...]
 let myAllowedProgIds  = null;       // null = 슈퍼어드민 (전체 허용)
 let extendTargetId    = null;
 let currentUser       = null;
@@ -1049,12 +1069,26 @@ function startApp() {
 
 /* ── DATA LOADING ── */
 async function loadAll() {
-  await Promise.all([loadPrograms(), loadCustomers(), loadBalancesGlobal()]);
+  await Promise.all([loadPrograms(), loadCustomers(), loadBalancesGlobal(), loadCustomerPrograms()]);
   if (isSuperAdmin) { await loadPartners(); await loadPartnerPrograms(); }
-  renderCustomers();   // balMap 준비된 후 렌더
+  renderCustomers();
   renderDashboard();
   renderExpiry();
   renderStats();
+}
+
+async function loadCustomerPrograms() {
+  try {
+    const { data, error } = await sb.from('customer_programs')
+      .select('customer_id, programs(id, name)');
+    if (error) return;
+    customerPrograms = {};
+    (data || []).forEach(r => {
+      if (!r.programs) return;
+      if (!customerPrograms[r.customer_id]) customerPrograms[r.customer_id] = [];
+      customerPrograms[r.customer_id].push({ id: r.programs.id, name: r.programs.name });
+    });
+  } catch(e) {}
 }
 
 async function loadBalancesGlobal() {
@@ -1170,7 +1204,7 @@ function renderDashboard() {
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
-      <td><span class="prog-tag">${c.progName}</span></td>
+      <td>${(customerPrograms[c.id]||[]).map(p=>`<span class="prog-tag">${p.name}</span>`).join(' ') || `<span class="prog-tag">${c.progName}</span>`}</td>
       <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
@@ -1186,14 +1220,18 @@ function renderCustomers(list) {
 
   document.getElementById('customers-table').innerHTML = list.length ? list.map(c => {
     const b = balMap[c.account_no];
-    const balTd   = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>`;
+    const balTd    = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>`;
     const profitTd = `<td style="font-size:12px;color:${b ? (b.profit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
       ${b ? (b.profit >= 0 ? '+' : '') + Number(b.profit).toFixed(2) : '—'}</td>`;
+    const progs = customerPrograms[c.id] || [];
+    const progTd = progs.length
+      ? progs.map(p => `<span class="prog-tag">${p.name}</span>`).join(' ')
+      : `<span style="color:var(--text3);font-size:11px">없음</span>`;
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td class="tg-link">${c.telegram_id || '—'}</td>
-      <td><span class="prog-tag">${c.progName}</span></td>
+      <td style="max-width:120px">${progTd}<br><button class="btn-sm" style="margin-top:4px;font-size:8px;padding:2px 7px" onclick='openManageEA("${c.id}","${c.name}")'>관리</button></td>
       <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       ${balTd}${profitTd}
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
@@ -1325,11 +1363,15 @@ async function addCustomer() {
     is_active:     true
   };
   if (!payload.name || !payload.account_no) { alert('이름과 계좌번호는 필수입니다.'); return; }
-  const { error } = await sb.from('customers').insert(payload);
+  const { data: inserted, error } = await sb.from('customers').insert(payload).select('id').single();
   if (error) { alert('오류: ' + error.message); return; }
+  // customer_programs에도 추가 (다중 EA 지원)
+  if (inserted?.id && payload.program_id) {
+    await sb.from('customer_programs').insert({ customer_id: inserted.id, program_id: payload.program_id }).catch(() => {});
+  }
   closeModals();
   showToast('고객이 등록되었습니다.');
-  await loadCustomers();
+  await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
 }
 
@@ -1414,6 +1456,60 @@ async function saveEdit() {
   showToast('수정되었습니다.');
   await loadCustomers();
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+}
+
+/* ── 고객 EA 관리 ── */
+function openManageEA(customerId, customerName) {
+  document.getElementById('mea-customer-id').value = customerId;
+  document.getElementById('mea-customer-name').textContent = customerName;
+  refreshManageEA(customerId);
+  document.getElementById('manage-ea-modal').classList.remove('hidden');
+}
+
+function refreshManageEA(customerId) {
+  const assigned = customerPrograms[customerId] || [];
+  const assignedIds = assigned.map(p => p.id);
+
+  // 현재 할당 목록
+  document.getElementById('mea-current-list').innerHTML = assigned.length
+    ? assigned.map(p => `
+        <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(109,91,250,.15);
+          border:1px solid var(--purple);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--purple-light)">
+          ${p.name}
+          <span onclick="removeEAFromCustomer('${customerId}','${p.id}')"
+            style="cursor:pointer;color:var(--red);font-size:13px;line-height:1;margin-left:2px">×</span>
+        </span>`).join('')
+    : '<span style="color:var(--text3);font-size:11px">할당된 EA 없음</span>';
+
+  // 추가 가능한 EA (이미 할당된 것 제외)
+  const visible = (myAllowedProgIds && !isSuperAdmin)
+    ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
+    : allPrograms;
+  const addable = visible.filter(p => !assignedIds.includes(p.id));
+  const sel = document.getElementById('mea-add-select');
+  sel.innerHTML = addable.length
+    ? addable.map(p => `<option value="${p.id}">${p.name}</option>`).join('')
+    : '<option value="">추가 가능한 EA 없음</option>';
+}
+
+async function addEAToCustomer() {
+  const customerId = document.getElementById('mea-customer-id').value;
+  const programId  = document.getElementById('mea-add-select').value;
+  if (!programId) return;
+  const { error } = await sb.from('customer_programs').insert({ customer_id: customerId, program_id: programId });
+  if (error) { alert('추가 오류: ' + error.message); return; }
+  await loadCustomerPrograms();
+  refreshManageEA(customerId);
+  renderCustomers(); renderDashboard();
+}
+
+async function removeEAFromCustomer(customerId, programId) {
+  const { error } = await sb.from('customer_programs')
+    .delete().eq('customer_id', customerId).eq('program_id', programId);
+  if (error) { alert('삭제 오류: ' + error.message); return; }
+  await loadCustomerPrograms();
+  refreshManageEA(customerId);
+  renderCustomers(); renderDashboard();
 }
 
 /* ── EA PROGRAM CRUD ── */
@@ -1533,7 +1629,7 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
 }
 
