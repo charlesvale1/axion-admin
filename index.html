@@ -1611,12 +1611,8 @@ async function addEAToCustomer() {
     return;
   }
 
-  /*
-    중요:
-    EA 파일은 customers 테이블의 account_no + program_name + is_active + expires_at 값을 조회합니다.
-    그래서 고객 관리 → EA 관리에서 프로그램을 추가할 때 customer_programs뿐 아니라
-    customers.program_id / customers.program_name도 함께 갱신해야 MT4 라이선스 검증이 통과됩니다.
-  */
+  // customer_programs 에만 삽입 — customers.is_active 는 건드리지 않음
+  // (is_active 는 관리자가 정지/활성으로만 제어, EA 할당과 독립적)
   const { error } = await sb.from('customer_programs')
     .insert({ customer_id: customerId, program_id: programId });
 
@@ -1625,23 +1621,10 @@ async function addEAToCustomer() {
     return;
   }
 
-  const { error: updateErr } = await sb.from('customers')
-    .update({
-      program_id: programId,
-      program_name: program.name,
-      is_active: true
-    })
-    .eq('id', customerId);
-
-  if (updateErr) {
-    await showAlert('EA 권한 반영 중 오류가 발생했습니다.\n' + updateErr.message, '❌');
-    return;
-  }
-
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   refreshManageEA(customerId);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  showToast(program.name + ' 라이선스가 고객 계정에 적용되었습니다.');
+  showToast(program.name + ' EA가 할당되었습니다.');
 }
 
 async function removeEAFromCustomer(customerId, programId) {
@@ -1649,27 +1632,10 @@ async function removeEAFromCustomer(customerId, programId) {
     .delete().eq('customer_id', customerId).eq('program_id', programId);
   if (error) { await showAlert('EA 제거 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
 
-  await loadCustomerPrograms();
-
-  const remaining = customerPrograms[customerId] || [];
-  const nextProgram = remaining.length ? remaining[0] : null;
-
-  const { error: updateErr } = await sb.from('customers')
-    .update({
-      program_id: nextProgram ? nextProgram.id : null,
-      program_name: nextProgram ? nextProgram.name : null
-    })
-    .eq('id', customerId);
-
-  if (updateErr) {
-    await showAlert('EA 권한 해제 반영 중 오류가 발생했습니다.\n' + updateErr.message, '❌');
-    return;
-  }
-
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   refreshManageEA(customerId);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  showToast('EA 라이선스가 해제되었습니다.');
+  showToast('EA가 해제되었습니다.');
 }
 
 /* ── EA PROGRAM CRUD ── */
