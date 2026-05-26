@@ -1114,14 +1114,17 @@ async function loadCustomerPrograms() {
 }
 
 async function loadBalancesGlobal() {
-  const [latestRes, prevRes] = await Promise.all([
-    sb.from('latest_balances').select('*'),
-    sb.from('yesterday_balances').select('*').catch(() => ({ data: [] }))
-  ]);
-  balMap = {};
-  prevBalMap = {};
-  (latestRes.data || []).forEach(b => { balMap[b.account_no] = b; });
-  ((prevRes.data) || []).forEach(b => { prevBalMap[b.account_no] = b; });
+  try {
+    const { data } = await sb.from('latest_balances').select('*');
+    balMap = {};
+    (data || []).forEach(b => { balMap[b.account_no] = b; });
+  } catch(e) {}
+
+  try {
+    const { data, error } = await sb.from('yesterday_balances').select('*');
+    prevBalMap = {};
+    if (!error) (data || []).forEach(b => { prevBalMap[b.account_no] = b; });
+  } catch(e) { prevBalMap = {}; }
 }
 
 async function loadPartnerPrograms() {
