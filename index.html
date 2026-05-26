@@ -821,16 +821,22 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <input class="form-input" id="f-server" placeholder="ICMarkets-Live" style="margin:0" />
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">라이선스 기간</label>
-      <select class="form-input" id="f-months" style="margin:0">
-        <option value="1">1개월</option>
-        <option value="2" selected>2개월</option>
-        <option value="3">3개월</option>
-        <option value="6">6개월</option>
-        <option value="12">1년</option>
-        <option value="1200">무기한 (테스트/관리자용)</option>
-      </select>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">라이선스 기간</label>
+        <select class="form-input" id="f-months" style="margin:0">
+          <option value="1">1개월</option>
+          <option value="2" selected>2개월</option>
+          <option value="3">3개월</option>
+          <option value="6">6개월</option>
+          <option value="12">1년</option>
+          <option value="1200">무기한 (테스트/관리자용)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">초기 입금액 ($)</label>
+        <input class="form-input" id="f-initial-balance" type="number" min="0" step="0.01" placeholder="예: 10000" style="margin:0" />
+      </div>
     </div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closeModals()">취소</button>
@@ -962,6 +968,10 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <label class="form-label">서버명</label>
         <input class="form-input" id="edit-server" style="margin:0" />
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">초기 입금액 ($)</label>
+      <input class="form-input" id="edit-initial-balance" type="number" min="0" step="0.01" placeholder="예: 10000" style="margin:0" />
     </div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closeModals()">취소</button>
@@ -1241,9 +1251,11 @@ function renderCustomers(list) {
 
   document.getElementById('customers-table').innerHTML = list.length ? list.map(c => {
     const b = balMap[c.account_no];
+    const initBal = Number(c.initial_balance || 0);
+    const realProfit = (b && initBal > 0) ? Number(b.balance) - initBal : null;
     const balTd    = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>`;
-    const profitTd = `<td style="font-size:12px;color:${b ? (b.profit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
-      ${b ? (b.profit >= 0 ? '+' : '') + Number(b.profit).toFixed(2) : '—'}</td>`;
+    const profitTd = `<td style="font-size:12px;color:${realProfit !== null ? (realProfit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
+      ${realProfit !== null ? (realProfit >= 0 ? '+' : '') + '$' + realProfit.toFixed(2) : (b ? '<span style="font-size:10px">입금액 미설정</span>' : '—')}</td>`;
     const progs = customerPrograms[c.id] || [];
     const progTd = progs.length
       ? progs.map(p => `<span class="prog-tag">${p.name}</span>`).join(' ')
@@ -1302,29 +1314,35 @@ function renderExpiry() {
 }
 
 async function renderStats() {
-  let totalBal = 0, totalProfit = 0, lastUpdate = null;
+  let totalBal = 0, totalProfit = 0, profitCount = 0, lastUpdate = null;
   const rows = allCustomers.map(c => {
     const b = balMap[c.account_no];
+    const initBal = Number(c.initial_balance || 0);
+    // 실현 수익 = 현재 잔액 - 초기 입금액 (출금도 자동 반영)
+    const realProfit = (b && initBal > 0) ? Number(b.balance) - initBal : null;
     if (b) {
-      totalBal    += Number(b.balance);
-      totalProfit += Number(b.profit || 0);
+      totalBal += Number(b.balance);
+      if (realProfit !== null) { totalProfit += realProfit; profitCount++; }
       if (!lastUpdate || new Date(b.logged_at) > new Date(lastUpdate)) lastUpdate = b.logged_at;
     }
+    const profitCell = realProfit !== null
+      ? `<span style="color:${realProfit >= 0 ? 'var(--green)' : 'var(--red)'}">
+           ${realProfit >= 0 ? '+' : ''}$${realProfit.toFixed(2)}</span>`
+      : `<span style="color:var(--text3);font-size:10px">${b ? '입금액 미설정' : '—'}</span>`;
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td><span class="prog-tag">${c.progName}</span></td>
       <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       <td style="font-weight:600">${b ? fmtMoney(b.balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
-      <td style="color:${b && b.profit >= 0 ? 'var(--green)' : 'var(--red)'}">
-        ${b ? (b.profit >= 0 ? '+' : '') + Number(b.profit).toFixed(2) : '—'}</td>
+      <td>${profitCell}</td>
       <td style="font-size:10px;color:var(--text3)">${b ? new Date(b.logged_at).toLocaleString('ko-KR') : '—'}</td>
     </tr>`;
   });
   document.getElementById('stats-table').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="7" class="empty">데이터 없음</td></tr>';
   document.getElementById('s-total-bal').textContent  = totalBal ? '$' + Math.round(totalBal).toLocaleString() : '—';
-  document.getElementById('s-avg').textContent        = totalProfit && allCustomers.length
-    ? (totalProfit >= 0 ? '+' : '') + (totalProfit / allCustomers.length).toFixed(2) : '—';
+  document.getElementById('s-avg').textContent        = profitCount
+    ? (totalProfit >= 0 ? '+' : '') + '$' + (totalProfit / profitCount).toFixed(2) : '—';
   document.getElementById('s-last-update').textContent = lastUpdate
     ? new Date(lastUpdate).toLocaleTimeString('ko-KR') : '미수신';
 }
@@ -1381,16 +1399,17 @@ async function addCustomer() {
   const progName = progSel.options[progSel.selectedIndex]?.text || '';
 
   const payload = {
-    name:          document.getElementById('f-name').value.trim(),
-    account_no:    document.getElementById('f-account').value.trim(),
-    telegram_id:   document.getElementById('f-telegram').value.trim(),
-    program_id:    document.getElementById('f-program').value || null,
-    program_name:  progName,
-    server_name:   document.getElementById('f-server').value.trim(),
-    team_name:     currentTeam,
-    registered_by: currentUser.id,
-    expires_at:    expires.toISOString(),
-    is_active:     true
+    name:            document.getElementById('f-name').value.trim(),
+    account_no:      document.getElementById('f-account').value.trim(),
+    telegram_id:     document.getElementById('f-telegram').value.trim(),
+    program_id:      document.getElementById('f-program').value || null,
+    program_name:    progName,
+    server_name:     document.getElementById('f-server').value.trim(),
+    team_name:       currentTeam,
+    registered_by:   currentUser.id,
+    expires_at:      expires.toISOString(),
+    is_active:       true,
+    initial_balance: parseFloat(document.getElementById('f-initial-balance').value) || 0
   };
 
   if (!payload.name || !payload.account_no) {
@@ -1446,7 +1465,7 @@ async function addCustomer() {
 
     closeModals();
 
-    ['f-name','f-account','f-telegram','f-server'].forEach(id => {
+    ['f-name','f-account','f-telegram','f-server','f-initial-balance'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -1526,11 +1545,12 @@ async function toggleActive(id, cur) {
 function openEdit(id) {
   const c = allCustomers.find(x => x.id === id);
   if (!c) return;
-  document.getElementById('edit-id').value       = id;
-  document.getElementById('edit-name').value     = c.name || '';
-  document.getElementById('edit-account').value  = c.account_no || '';
-  document.getElementById('edit-telegram').value = c.telegram_id || '';
-  document.getElementById('edit-server').value   = c.server_name || '';
+  document.getElementById('edit-id').value              = id;
+  document.getElementById('edit-name').value            = c.name || '';
+  document.getElementById('edit-account').value         = c.account_no || '';
+  document.getElementById('edit-telegram').value        = c.telegram_id || '';
+  document.getElementById('edit-server').value          = c.server_name || '';
+  document.getElementById('edit-initial-balance').value = c.initial_balance || '';
 
   const visible = (myAllowedProgIds && !isSuperAdmin)
     ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
@@ -1548,12 +1568,13 @@ async function saveEdit() {
   const progSel  = document.getElementById('edit-program');
   const progName = progSel.options[progSel.selectedIndex]?.text || '';
   const payload  = {
-    name:         document.getElementById('edit-name').value.trim(),
-    account_no:   document.getElementById('edit-account').value.trim(),
-    telegram_id:  document.getElementById('edit-telegram').value.trim(),
-    program_id:   progSel.value || null,
-    program_name: progName,
-    server_name:  document.getElementById('edit-server').value.trim(),
+    name:            document.getElementById('edit-name').value.trim(),
+    account_no:      document.getElementById('edit-account').value.trim(),
+    telegram_id:     document.getElementById('edit-telegram').value.trim(),
+    program_id:      progSel.value || null,
+    program_name:    progName,
+    server_name:     document.getElementById('edit-server').value.trim(),
+    initial_balance: parseFloat(document.getElementById('edit-initial-balance').value) || 0
   };
   if (!payload.name || !payload.account_no) {
     await showAlert('이름과 계좌번호를 입력해주세요.', '⚠️'); return;
