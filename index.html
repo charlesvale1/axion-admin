@@ -532,6 +532,91 @@ tr:hover td { background: rgba(255,255,255,.012); }
 .empty { color: var(--text2); font-size: 13px; padding: 44px; text-align: center; letter-spacing: .02em; }
 .page { display: none; }
 .page.active { display: block; }
+
+/* ── MOBILE / RESPONSIVE ── */
+.hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  color: var(--text2);
+  font-size: 20px;
+  line-height: 1;
+}
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 49;
+}
+
+@media (max-width: 768px) {
+  /* Sidebar: hidden off-screen by default, slides in */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    width: 220px;
+    min-width: 220px;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay.open { display: block; }
+
+  /* Hamburger visible */
+  .hamburger { display: flex; align-items: center; justify-content: center; }
+
+  /* Main area takes full width */
+  .main { width: 100%; }
+
+  /* Topbar */
+  .topbar { padding: 10px 14px; }
+  .topbar-title { font-size: 12px; }
+  .alert-pill { font-size: 8px; padding: 4px 8px; }
+  .btn-primary { font-size: 9px; padding: 6px 12px; }
+
+  /* Content padding reduced */
+  .content { padding: 14px 12px; }
+
+  /* Metrics: 2 columns */
+  .metrics { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+  .mc { padding: 14px 14px 12px; }
+  .mc-val { font-size: 24px; }
+  .mc-sub { font-size: 10px; }
+
+  /* Tables: horizontal scroll */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius); }
+  table { min-width: 520px; }
+  th, td { padding: 9px 10px; font-size: 11px; }
+  th { font-size: 10px; }
+
+  /* Alert box full width */
+  .alert-box { font-size: 10px; padding: 10px 12px; }
+
+  /* Search row stacks */
+  .search-row { flex-direction: column; }
+  .search-input { min-width: unset; width: 100%; }
+
+  /* Section header */
+  .section-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  /* Modals full-width */
+  .modal { width: 96vw !important; max-width: 96vw !important; padding: 22px 18px; }
+  .form-grid { grid-template-columns: 1fr; gap: 0; }
+
+  /* Action buttons smaller */
+  .btn-sm { font-size: 8px; padding: 3px 7px; }
+  .action-gap { gap: 3px; }
+}
+
+@media (max-width: 420px) {
+  /* Metrics: single column on very small */
+  .metrics { grid-template-columns: 1fr; }
+  .mc-val { font-size: 28px; }
+}
 </style>
 </head>
 <body>
@@ -558,8 +643,11 @@ tr:hover td { background: rgba(255,255,255,.012); }
 <div id="app">
   <div class="layout">
 
+    <!-- SIDEBAR OVERLAY (mobile) -->
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
     <!-- SIDEBAR -->
-    <div class="sidebar">
+    <div class="sidebar" id="sidebar">
       <div class="sidebar-logo">
         <div class="logo-main"><span class="logo-dot"></span>AXION</div>
         <div class="logo-sub">EA License Manager</div>
@@ -598,6 +686,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
     <div class="main">
       <div class="topbar">
         <div class="topbar-left">
+          <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()">☰</button>
           <div class="topbar-dot"></div>
           <div class="topbar-title" id="page-title">대시보드</div>
         </div>
@@ -693,18 +782,18 @@ tr:hover td { background: rgba(255,255,255,.012); }
 
         <!-- EXPIRY -->
         <div class="page" id="page-expiry">
-          <div class="alert-box">⚠ 아래 고객들의 라이선스가 7일 이내 만료됩니다. 텔레그램으로 연락 후 갱신 처리하세요.</div>
+          <div class="alert-box" style="width:100%">⚠ 아래 고객들의 라이선스가 7일 이내 만료됩니다. 텔레그램으로 연락 후 갱신 처리하세요.</div>
           <div class="table-wrap">
-            <table>
+            <table style="table-layout:auto">
               <thead><tr>
-                <th style="width:80px">이름</th>
-                <th style="width:110px">계좌번호</th>
-                <th style="width:95px">텔레그램</th>
-                <th style="width:88px">프로그램</th>
-                <th style="width:75px">잔고</th>
-                <th style="width:92px">만료일</th>
-                <th style="width:62px">D-Day</th>
-                <th style="width:105px">액션</th>
+                <th>이름</th>
+                <th>계좌번호</th>
+                <th>텔레그램</th>
+                <th>프로그램</th>
+                <th>잔고</th>
+                <th>만료일</th>
+                <th>D-Day</th>
+                <th>액션</th>
               </tr></thead>
               <tbody id="expiry-table"><tr><td colspan="8" class="loading">불러오는 중</td></tr></tbody>
             </table>
@@ -982,6 +1071,18 @@ tr:hover td { background: rgba(255,255,255,.012); }
 <div class="toast" id="toast"></div>
 
 <script>
+/* ── MOBILE SIDEBAR ── */
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const open = sb.classList.toggle('open');
+  ov.classList.toggle('open', open);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
 /* ════════════════════════════════════════════
    설정 — 총 관리자 이메일을 여기에 입력하세요
    ════════════════════════════════════════════ */
@@ -1755,6 +1856,7 @@ function showPage(id) {
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.getAttribute('onclick')?.includes("'" + id + "'"));
   });
+  closeSidebar();
 }
 
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
