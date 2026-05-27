@@ -645,12 +645,11 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:80px">이름</th>
                 <th style="width:115px">계좌번호</th>
                 <th style="width:95px">프로그램</th>
-                <th style="width:80px">서버</th>
                 <th style="width:80px">잔고</th>
                 <th style="width:95px">만료일</th>
                 <th style="width:75px">상태</th>
               </tr></thead>
-              <tbody id="dash-table"><tr><td colspan="7" class="loading">불러오는 중</td></tr></tbody>
+              <tbody id="dash-table"><tr><td colspan="6" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -680,7 +679,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:105px">계좌번호</th>
                 <th style="width:90px">텔레그램</th>
                 <th style="width:88px">프로그램</th>
-                <th style="width:70px">서버</th>
                 <th style="width:70px">잔고</th>
                 <th style="width:55px">전일대비</th>
                 <th style="width:88px">만료일</th>
@@ -688,7 +686,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:70px">상태</th>
                 <th style="width:90px">액션</th>
               </tr></thead>
-              <tbody id="customers-table"><tr><td colspan="11" class="loading">불러오는 중</td></tr></tbody>
+              <tbody id="customers-table"><tr><td colspan="10" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -703,13 +701,12 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:110px">계좌번호</th>
                 <th style="width:95px">텔레그램</th>
                 <th style="width:88px">프로그램</th>
-                <th style="width:75px">서버</th>
                 <th style="width:75px">잔고</th>
                 <th style="width:92px">만료일</th>
                 <th style="width:62px">D-Day</th>
                 <th style="width:105px">액션</th>
               </tr></thead>
-              <tbody id="expiry-table"><tr><td colspan="9" class="loading">불러오는 중</td></tr></tbody>
+              <tbody id="expiry-table"><tr><td colspan="8" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -739,7 +736,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:78px">이름</th>
                 <th style="width:110px">계좌번호</th>
                 <th style="width:90px">프로그램</th>
-                <th style="width:80px">서버</th>
                 <th style="width:95px">현재 잔고</th>
                 <th style="width:85px">전일대비</th>
                 <th style="width:110px">업데이트</th>
@@ -815,10 +811,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
       <div class="form-group">
         <label class="form-label">프로그램</label>
         <select class="form-input" id="f-program" style="margin:0"></select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">서버명</label>
-        <input class="form-input" id="f-server" placeholder="ICMarkets-Live" style="margin:0" />
       </div>
     </div>
     <div class="form-group">
@@ -957,10 +949,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
       <div class="form-group">
         <label class="form-label">프로그램</label>
         <select class="form-input" id="edit-program" style="margin:0"></select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">서버명</label>
-        <input class="form-input" id="edit-server" style="margin:0" />
       </div>
     </div>
     <div class="modal-btns">
@@ -1121,9 +1109,18 @@ async function loadBalancesGlobal() {
   } catch(e) {}
 
   try {
-    const { data, error } = await sb.from('yesterday_balances').select('*');
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
+    const { data: prevData } = await sb.from('balance_logs')
+      .select('account_no, balance, logged_at')
+      .lt('logged_at', todayStart.toISOString())
+      .gte('logged_at', yesterdayStart.toISOString())
+      .order('logged_at', { ascending: false });
     prevBalMap = {};
-    if (!error) (data || []).forEach(b => { prevBalMap[b.account_no] = b; });
+    (prevData || []).forEach(b => {
+      if (!prevBalMap[b.account_no]) prevBalMap[b.account_no] = { prev_balance: b.balance };
+    });
   } catch(e) { prevBalMap = {}; }
 }
 
@@ -1235,7 +1232,6 @@ function renderDashboard() {
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td>${(customerPrograms[c.id]||[]).map(p=>`<span class="prog-tag">${p.name}</span>`).join(' ') || `<span class="prog-tag">${c.progName}</span>`}</td>
-      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
       <td>${statusBadge(c.status)}</td>
@@ -1264,7 +1260,6 @@ function renderCustomers(list) {
       <td class="mono">${c.account_no}</td>
       <td class="tg-link">${c.telegram_id || '—'}</td>
       <td style="max-width:120px">${progTd}<br><button class="btn-sm" style="margin-top:4px;font-size:8px;padding:2px 7px" onclick='openManageEA("${c.id}","${c.name}")'>관리</button></td>
-      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       ${balTd}${profitTd}
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
       ${teamCol(c)}
@@ -1303,7 +1298,6 @@ function renderExpiry() {
       <td class="mono">${c.account_no}</td>
       <td class="tg-link">${c.telegram_id || '—'}</td>
       <td><span class="prog-tag">${c.progName}</span></td>
-      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
       <td>${dDay(c.daysLeft)}</td>
@@ -1331,7 +1325,6 @@ async function renderStats() {
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td><span class="prog-tag">${c.progName}</span></td>
-      <td style="font-size:11px;color:var(--text2)">${shortSrv(c.server_name)}</td>
       <td style="font-weight:600">${b ? fmtMoney(b.balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
       <td>${profitCell}</td>
       <td style="font-size:10px;color:var(--text3)">${b ? new Date(b.logged_at).toLocaleString('ko-KR') : '—'}</td>
@@ -1402,7 +1395,6 @@ async function addCustomer() {
     telegram_id:     document.getElementById('f-telegram').value.trim(),
     program_id:      document.getElementById('f-program').value || null,
     program_name:    progName,
-    server_name:     document.getElementById('f-server').value.trim(),
     team_name:       currentTeam,
     registered_by:   currentUser.id,
     expires_at:      expires.toISOString(),
@@ -1462,7 +1454,7 @@ async function addCustomer() {
 
     closeModals();
 
-    ['f-name','f-account','f-telegram','f-server'].forEach(id => {
+    ['f-name','f-account','f-telegram'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -1546,7 +1538,6 @@ function openEdit(id) {
   document.getElementById('edit-name').value     = c.name || '';
   document.getElementById('edit-account').value  = c.account_no || '';
   document.getElementById('edit-telegram').value = c.telegram_id || '';
-  document.getElementById('edit-server').value   = c.server_name || '';
 
   const visible = (myAllowedProgIds && !isSuperAdmin)
     ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
@@ -1569,7 +1560,6 @@ async function saveEdit() {
     telegram_id:     document.getElementById('edit-telegram').value.trim(),
     program_id:      progSel.value || null,
     program_name:    progName,
-    server_name:  document.getElementById('edit-server').value.trim(),
   };
   if (!payload.name || !payload.account_no) {
     await showAlert('이름과 계좌번호를 입력해주세요.', '⚠️'); return;
