@@ -1180,8 +1180,17 @@ function startApp() {
 
 /* ── DATA LOADING ── */
 async function loadAll() {
-  await Promise.all([loadPrograms(), loadCustomers(), loadBalancesGlobal(), loadCustomerPrograms()]);
-  if (isSuperAdmin) { await loadPartners(); await loadPartnerPrograms(); }
+  // 1단계: 고객 목록 + 프로그램 먼저 — 화면 바로 표시
+  await Promise.all([loadPrograms(), loadCustomers(), loadCustomerPrograms()]);
+  renderCustomers();
+  renderDashboard();
+  renderExpiry();
+  renderStats();
+
+  // 2단계: 잔고 + 파트너(슈퍼어드민) 백그라운드 병렬 로드 → 완료 후 재렌더
+  const extras = [loadBalancesGlobal()];
+  if (isSuperAdmin) extras.push(loadPartners(), loadPartnerPrograms());
+  await Promise.all(extras);
   renderCustomers();
   renderDashboard();
   renderExpiry();
@@ -1203,26 +1212,31 @@ async function loadCustomerPrograms() {
 }
 
 async function loadBalancesGlobal() {
-  try {
-    const { data } = await sb.from('latest_balances').select('*');
-    balMap = {};
-    (data || []).forEach(b => { balMap[b.account_no] = b; });
-  } catch(e) {}
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
 
-  try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
-    const { data: prevData } = await sb.from('balance_logs')
+  // 두 쿼리 동시 실행
+  const [latestRes, prevRes] = await Promise.allSettled([
+    sb.from('latest_balances').select('*'),
+    sb.from('balance_logs')
       .select('account_no, balance, logged_at')
       .lt('logged_at', todayStart.toISOString())
       .gte('logged_at', yesterdayStart.toISOString())
-      .order('logged_at', { ascending: false });
-    prevBalMap = {};
-    (prevData || []).forEach(b => {
+      .order('logged_at', { ascending: false })
+  ]);
+
+  balMap = {};
+  if (latestRes.status === 'fulfilled' && latestRes.value.data) {
+    latestRes.value.data.forEach(b => { balMap[b.account_no] = b; });
+  }
+
+  prevBalMap = {};
+  if (prevRes.status === 'fulfilled' && prevRes.value.data) {
+    prevRes.value.data.forEach(b => {
       if (!prevBalMap[b.account_no]) prevBalMap[b.account_no] = { prev_balance: b.balance };
     });
-  } catch(e) { prevBalMap = {}; }
+  }
 }
 
 async function loadPartnerPrograms() {
