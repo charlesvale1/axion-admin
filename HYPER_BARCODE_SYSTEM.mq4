@@ -1254,8 +1254,8 @@ bool IsHistoricalHitShift(int targetShift)
    if(lookback < 5)
       return false;
 
-   int sigShift[512];
-   int sigDir[512];
+   int sigShift[512]; ArrayInitialize(sigShift,0);
+   int sigDir[512];   ArrayInitialize(sigDir,0);
    int sigCount = 0;
 
    // Collect barcode signals from old to new.
@@ -1287,10 +1287,10 @@ bool IsHistoricalHitShift(int targetShift)
    if(sigCount <= 0)
       return false;
 
-   int    posType[512];
-   double posLot[512];
-   double posPrice[512];
-   int    posSignalShift[512];
+   int    posType[512];  ArrayInitialize(posType,0);
+   double posLot[512];   ArrayInitialize(posLot,0);
+   double posPrice[512]; ArrayInitialize(posPrice,0);
+   int    posSignalShift[512]; ArrayInitialize(posSignalShift,0);
    int    posCount = 0;
 
    int lineCount = 0;
@@ -1411,8 +1411,8 @@ void CalculateHitLineStats(int &hit1, int &hit2, int &hit3, int &hit4, int &hit5
    if(lookback < 5)
       return;
 
-   int sigShift[512];
-   int sigDir[512];
+   int sigShift[512]; ArrayInitialize(sigShift,0);
+   int sigDir[512];   ArrayInitialize(sigDir,0);
    int sigCount = 0;
 
    // Collect barcode signals from old to new.
@@ -1444,9 +1444,9 @@ void CalculateHitLineStats(int &hit1, int &hit2, int &hit3, int &hit4, int &hit5
    if(sigCount <= 0)
       return;
 
-   int    posType[512];
-   double posLot[512];
-   double posPrice[512];
+   int    posType[512];  ArrayInitialize(posType,0);
+   double posLot[512];   ArrayInitialize(posLot,0);
+   double posPrice[512]; ArrayInitialize(posPrice,0);
    int    posCount = 0;
 
    int lineCount = 0;
@@ -1559,8 +1559,8 @@ void CalculateHitLineDirectionStats(int &b1, int &s1, int &b2, int &s2, int &b3,
    if(lookback < 5)
       return;
 
-   int sigShift[512];
-   int sigDir[512];
+   int sigShift[512]; ArrayInitialize(sigShift,0);
+   int sigDir[512];   ArrayInitialize(sigDir,0);
    int sigCount = 0;
 
    for(int shift = lookback; shift >= 1; shift--)
@@ -1591,10 +1591,10 @@ void CalculateHitLineDirectionStats(int &b1, int &s1, int &b2, int &s2, int &b3,
    if(sigCount <= 0)
       return;
 
-   int    posType[512];
-   double posLot[512];
-   double posPrice[512];
-   int    posSignalDir[512];
+   int    posType[512];  ArrayInitialize(posType,0);
+   double posLot[512];   ArrayInitialize(posLot,0);
+   double posPrice[512]; ArrayInitialize(posPrice,0);
+   int    posSignalDir[512]; ArrayInitialize(posSignalDir,0);
    int    posCount = 0;
 
    int lineCount = 0;
