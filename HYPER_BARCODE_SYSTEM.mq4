@@ -358,13 +358,31 @@ bool CheckLicense()
       return(false);
    }
 
-   // customer id 파싱
-   int is_ = StringFind(body1, "\"id\":\"") + 6;
+   // customer id 파싱 (UUID 문자열 / 정수형 모두 처리)
    string custId = "";
-   if(is_ > 5)
+   int idPos = StringFind(body1, "\"id\":");
+   if(idPos >= 0)
    {
-      int ie = StringFind(body1, "\"", is_);
-      if(ie > is_) custId = StringSubstr(body1, is_, ie - is_);
+      int vStart = idPos + 5;
+      if(StringGetCharacter(body1, vStart) == '"')
+      {
+         // UUID 타입: "id":"xxxxxxxx-..."
+         vStart++;
+         int vEnd = StringFind(body1, "\"", vStart);
+         if(vEnd > vStart) custId = StringSubstr(body1, vStart, vEnd - vStart);
+      }
+      else
+      {
+         // 정수 타입: "id":12345
+         int vEnd = vStart;
+         while(vEnd < StringLen(body1))
+         {
+            ushort c = StringGetCharacter(body1, vEnd);
+            if(c < '0' || c > '9') break;
+            vEnd++;
+         }
+         if(vEnd > vStart) custId = StringSubstr(body1, vStart, vEnd - vStart);
+      }
    }
    if(custId == "")
    {
