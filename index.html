@@ -414,6 +414,12 @@ tr:hover td { background: rgba(255,255,255,.012); }
   letter-spacing: .06em;
   font-weight: 600;
   text-transform: uppercase;
+  max-width: 110px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .team-tag {
   background: var(--bg4);
@@ -1176,6 +1182,11 @@ function startApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
+  // 잔고 60초마다 자동 갱신
+  setInterval(async () => {
+    await loadBalancesGlobal();
+    renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  }, 60000);
 }
 
 /* ── DATA LOADING ── */

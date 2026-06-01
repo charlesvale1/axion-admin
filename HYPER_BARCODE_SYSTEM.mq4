@@ -30,13 +30,16 @@ int    Password         = 201021;
 // License - Axion Research
 // =========================
 extern string LICENSE_SETTING = "========== License Setting (Axion Research) ==========";
-extern bool   UseLicenseCheck = true;        // Axion Research 파트너 라이센스 체크
-extern string LicenseAccountNo = "";         // 비우면 현재 계좌 사용
-extern string ProgramName = "HYPER_BARCODE_SYSTEM"; // Supabase 프로그램명
+extern bool   UseLicenseCheck    = true;             // Axion Research 파트너 라이센스 체크
+extern string LicenseAccountNo   = "";               // 비우면 현재 계좌 사용
+extern string ProgramName        = "HYPER_BARCODE_SYSTEM"; // Supabase 프로그램명
+extern bool   SendBalance        = true;             // 잔고 전송 여부
+extern int    SendBalanceMinutes = 3;                // 전송 주기 (분)
 
-bool   LicenseOK = false;
-string LicenseStatus = "확인 중...";
+bool     LicenseOK = false;
+string   LicenseStatus = "확인 중...";
 datetime LastLicenseCheck = 0;
+datetime LastBalanceSend  = 0;
 
 
 // =========================
@@ -283,6 +286,20 @@ void OnDeinit(const int reason)
 }
 
 
+void SendBalanceToSupabase()
+{
+   string anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
+   string acc  = IntegerToString((int)AccountNumber());
+   string body = "{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+
+                 ",\"equity\":"+DoubleToString(AccountEquity(),2)+
+                 ",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
+   string h = "Content-Type: application/json\r\napikey: "+anonKey+
+              "\r\nAuthorization: Bearer "+anonKey+"\r\nPrefer: return=minimal";
+   char p[]; char r[]; string rh;
+   StringToCharArray(body,p,0,StringLen(body)); ArrayResize(p,StringLen(body));
+   WebRequest("POST","https://wmvnearoursbmwjqwzww.supabase.co/rest/v1/balance_logs",h,5000,p,r,rh);
+}
+
 //+------------------------------------------------------------------+
 //| 라이센스 체크 함수 (Axion Research 파트너 페이지)
 //+------------------------------------------------------------------+
@@ -464,6 +481,11 @@ void OnTimer()
    DrawControlButtons();
    DrawTargetLine();
    DrawPanel();
+   if(LicenseOK && SendBalance && TimeCurrent()-LastBalanceSend >= SendBalanceMinutes*60)
+   {
+      LastBalanceSend = TimeCurrent();
+      SendBalanceToSupabase();
+   }
 }
 
 
