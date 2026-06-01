@@ -32,7 +32,7 @@ int    Password         = 201021;
 extern string LICENSE_SETTING = "========== License Setting (Axion Research) ==========";
 extern bool   UseLicenseCheck = true;        // Axion Research 파트너 라이센스 체크
 extern string LicenseAccountNo = "";         // 비우면 현재 계좌 사용
-extern string ProgramName = "HYPER_BARCODE"; // Supabase 프로그램명
+extern string ProgramName = "HYPER_BARCODE_SYSTEM"; // Supabase 프로그램명
 
 bool   LicenseOK = false;
 string LicenseStatus = "확인 중...";
