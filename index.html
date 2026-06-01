@@ -1749,26 +1749,41 @@ async function addEAToCustomer() {
     return;
   }
 
-  // customer_programs 에만 삽입 — customers.is_active 는 건드리지 않음
-  // (is_active 는 관리자가 정지/활성으로만 제어, EA 할당과 독립적)
-  const { error } = await sb.from('customer_programs')
+  // 1) customer_programs 테이블에 삽입
+  const { error: cpErr } = await sb.from('customer_programs')
     .insert({ customer_id: customerId, program_id: programId });
 
-  if (error && !(error.message || '').toLowerCase().includes('duplicate')) {
-    await showAlert('EA 추가 중 오류가 발생했습니다.\n' + error.message, '❌');
+  if (cpErr && !(cpErr.message || '').toLowerCase().includes('duplicate')) {
+    await showAlert('EA 추가 중 오류가 발생했습니다.\n' + cpErr.message, '❌');
     return;
+  }
+
+  // 2) customers.program_name 동기화 (EA 코드 라이센스 체크가 이 컬럼을 사용)
+  const { error: upErr } = await sb.from('customers')
+    .update({ program_name: program.name, is_active: true })
+    .eq('id', customerId);
+
+  if (upErr) {
+    await showAlert('EA 할당은 완료됐지만 program_name 동기화 오류:\n' + upErr.message, '⚠️');
   }
 
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   refreshManageEA(customerId);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  showToast(program.name + ' EA가 할당되었습니다.');
+  showToast(program.name + ' EA가 할당되었습니다. ✅');
 }
 
 async function removeEAFromCustomer(customerId, programId) {
   const { error } = await sb.from('customer_programs')
     .delete().eq('customer_id', customerId).eq('program_id', programId);
   if (error) { await showAlert('EA 제거 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
+
+  // 남은 EA 중 마지막 것으로 program_name 업데이트 (없으면 null)
+  const remaining = (customerPrograms[customerId] || []).filter(p => p.id !== programId);
+  const newName = remaining.length > 0 ? remaining[remaining.length - 1].name : null;
+  await sb.from('customers')
+    .update({ program_name: newName, is_active: !!newName })
+    .eq('id', customerId);
 
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   refreshManageEA(customerId);
