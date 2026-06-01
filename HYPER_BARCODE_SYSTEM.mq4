@@ -27,6 +27,19 @@ int    Password         = 201021;
 
 
 // =========================
+// License - Axion Research
+// =========================
+extern string LICENSE_SETTING = "========== License Setting (Axion Research) ==========";
+extern bool   UseLicenseCheck = true;        // Axion Research 파트너 라이센스 체크
+extern string LicenseAccountNo = "";         // 비우면 현재 계좌 사용
+extern string ProgramName = "HYPER_BARCODE"; // Supabase 프로그램명
+
+bool   LicenseOK = false;
+string LicenseStatus = "확인 중...";
+datetime LastLicenseCheck = 0;
+
+
+// =========================
 // Order Setting
 // =========================
 input string SETTING_________2 = "========== Order Setting ==========";
@@ -78,18 +91,6 @@ bool   TradeOnNewBarOnly = true;         // hidden
 bool   ShowRiskPopup    = true;          // hidden
 bool   SetChartStyle    = true;          // hidden
 
-//===================================================
-// [AXION 라이선스] (변경 금지)
-//===================================================
-extern string _AX0_ = "=== [AXION 라이선스] (변경금지) ===";
-extern string 프로그램명  = "HYPER_BARCODE_SYSTEM";
-extern string _AX1_ = "서버 주소 (변경금지)";
-extern string 서버주소    = "https://wmvnearoursbmwjqwzww.supabase.co";
-extern string _AX2_ = "인증키 (변경금지)";
-extern string 인증키      = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
-extern bool   SendBalance  = true;
-extern int    SendBalanceMinutes = 5;
-
 // Hidden visual settings
 bool   DrawMovingAverages = false;
 int    DrawBarsCount      = 250;
@@ -102,10 +103,6 @@ int    CrossLookbackBars  = 600;
 // =========================
 // Runtime
 // =========================
-bool     licenseOK      = false;
-string   licenseStatus  = "확인 중...";
-datetime 마지막라이센스체크 = 0;
-
 bool EAStopped = false;
 datetime LastBarTime = 0;
 datetime LastSignalBarTime = 0;
@@ -205,76 +202,29 @@ void   DeletePanel();
 
 string Money(double v);
 string Dbl(double v, int d);
+bool   CheckLicense();
 
-
-// =========================
-// AXION 라이선스 함수
-// =========================
-bool CheckLicense()
-{
-   string _acc = IntegerToString((int)AccountNumber());
-   string _rh  = "apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
-   char _p[]; char _r[]; string _rhs;
-
-   // Step 1: account_no + is_active 확인, id + expires_at 취득
-   string _url1 = 서버주소+"/rest/v1/customers?account_no=eq."+_acc+"&is_active=eq.true&select=id,expires_at";
-   int _http1 = WebRequest("GET",_url1,_rh,8000,_p,_r,_rhs);
-   string _body1 = CharArrayToString(_r);
-   Print("HYPER_BARCODE License Step1 HTTP=",_http1," body=",_body1);
-   if(_http1!=200||_body1=="[]"||StringFind(_body1,"expires_at")<0)
-   { licenseStatus="미등록/비활성 계좌 (HTTP="+IntegerToString(_http1)+")"; return false; }
-
-   // 만료일 파싱
-   int _es = StringFind(_body1,"\"expires_at\":\"")+14;
-   string _exp = StringSubstr(_body1,_es,10); StringReplace(_exp,"-",".");
-   if(_exp < TimeToString(TimeCurrent(),TIME_DATE))
-   { licenseStatus="만료됨 ("+_exp+")"; return false; }
-
-   // customer_id 파싱
-   int _is = StringFind(_body1,"\"id\":\"")+6;
-   string _custId = "";
-   if(_is > 5) {
-      int _ie = StringFind(_body1,"\"",_is);
-      if(_ie > _is) _custId = StringSubstr(_body1,_is,_ie-_is);
-   }
-   if(_custId == "") { licenseStatus="ID 파싱 실패"; return false; }
-
-   // Step 2: customer_programs에서 이 EA 할당 여부 확인
-   char _r2[]; string _rhs2;
-   string _url2 = 서버주소+"/rest/v1/customer_programs?customer_id=eq."+_custId+"&select=programs(name)";
-   int _http2 = WebRequest("GET",_url2,_rh,8000,_p,_r2,_rhs2);
-   string _body2 = CharArrayToString(_r2);
-   Print("HYPER_BARCODE License Step2 HTTP=",_http2," body=",_body2);
-   if(_http2!=200||_body2=="[]")
-   { licenseStatus="미할당 프로그램"; return false; }
-
-   string _body2L = _body2; StringToLower(_body2L);
-   string _progL  = 프로그램명; StringToLower(_progL);
-   if(StringFind(_body2L,_progL)<0)
-   { licenseStatus="이 EA 미할당 ("+프로그램명+")"; return false; }
-
-   licenseStatus = "정상 ("+_exp+"까지)";
-   return true;
-}
-
-void SendBalanceToSupabase()
-{
-   string acc  = IntegerToString((int)AccountNumber());
-   string body = "{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+
-                 ",\"equity\":"+DoubleToString(AccountEquity(),2)+
-                 ",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
-   string h = "Content-Type: application/json\r\napikey: "+인증키+
-              "\r\nAuthorization: Bearer "+인증키+"\r\nPrefer: return=minimal";
-   char p[]; char r[]; string rh;
-   StringToCharArray(body,p,0,StringLen(body)); ArrayResize(p,StringLen(body));
-   WebRequest("POST",서버주소+"/rest/v1/balance_logs",h,5000,p,r,rh);
-}
 
 // =========================
 // Init / Deinit
 // =========================
 int OnInit()
 {
+   LicenseOK = false;
+   LicenseStatus = "확인 중...";
+   
+   Comment("HYPER BARCODE: 라이센스 확인 중...");
+   Sleep(300);
+   
+   if(!CheckLicense())
+   {
+      Comment("HYPER BARCODE: " + LicenseStatus + "\nAxion Research 파트너 페이지에서 권한을 신청하세요.");
+      Alert("HYPER BARCODE: 라이센스 없음. Axion Research 파트너 페이지에서 권한 신청 필요.");
+      return(INIT_FAILED);
+   }
+   
+   Comment("");  // 라이센스 확인 메시지 제거
+   
    if(ShowRiskPopup)
    {
       string riskText = "";
@@ -296,14 +246,6 @@ int OnInit()
 
    if(SetChartStyle)
       SetupChart();
-
-   // 라이선스 확인
-   licenseOK = false; licenseStatus = "확인 중...";
-   Comment("HYPER BARCODE: 라이선스 확인 중...");
-   Sleep(300);
-   if(!CheckLicense())
-   { Comment("HYPER BARCODE: "+licenseStatus); return(INIT_FAILED); }
-   licenseOK = true;
 
    SessionStartBalance = AccountBalance();
 
@@ -340,8 +282,156 @@ void OnDeinit(const int reason)
    ClearVisualObjects();
 }
 
+
+//+------------------------------------------------------------------+
+//| 라이센스 체크 함수 (Axion Research 파트너 페이지)
+//+------------------------------------------------------------------+
+bool CheckLicense()
+{
+   if(!UseLicenseCheck)
+   {
+      LicenseOK = true;
+      LicenseStatus = "라이센스 체크 안 함";
+      return(true);
+   }
+
+   // 1시간마다 재확인
+   if(LicenseOK && TimeCurrent() - LastLicenseCheck < 3600)
+      return(true);
+
+   string acct = LicenseAccountNo;
+   if(StringLen(acct) == 0)
+      acct = IntegerToString(AccountNumber());
+
+   string anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
+   string baseURL = "https://wmvnearoursbmwjqwzww.supabase.co";
+   string headers = "apikey: " + anonKey + "\r\n"
+                  + "Authorization: Bearer " + anonKey + "\r\n"
+                  + "Content-Type: application/json";
+   char req[], res1[];
+   string resHeaders;
+
+   // ── Step 1: account_no + is_active 확인, id + expires_at 취득 ──
+   string url1 = baseURL + "/rest/v1/customers"
+               + "?account_no=eq." + acct
+               + "&is_active=eq.true"
+               + "&select=id,expires_at";
+
+   int ret1 = WebRequest("GET", url1, headers, 5000, req, res1, resHeaders);
+   if(ret1 < 0)
+   {
+      int err = GetLastError();
+      if(err == 4060)
+      {
+         LicenseStatus = "WebRequest URL 미등록. MT4 설정 필요.";
+         Print("라이센스 ERROR: ", LicenseStatus);
+         Print("라이센스 ERROR: MT4 → 도구 → 옵션 → Expert Advisors → WebRequest URL 추가:");
+         Print("라이센스 ERROR: ", baseURL);
+      }
+      else
+         LicenseStatus = "네트워크 오류 (err=" + IntegerToString(err) + ")";
+      Print("라이센스 ERROR: ", LicenseStatus);
+      LicenseOK = false;
+      return(false);
+   }
+
+   string body1 = CharArrayToString(res1);
+   Print("라이센스 Step1 HTTP=", ret1, " body=", body1);
+
+   if(ret1 != 200 || body1 == "[]" || StringFind(body1, "expires_at") < 0)
+   {
+      LicenseStatus = "미등록/비활성 계좌 (HTTP=" + IntegerToString(ret1) + ")";
+      Print("라이센스 ERROR: ", LicenseStatus, " | 계좌=", acct);
+      LicenseOK = false;
+      return(false);
+   }
+
+   // 만료일 파싱
+   int es = StringFind(body1, "\"expires_at\":\"") + 14;
+   string expStr = StringSubstr(body1, es, 10);
+   StringReplace(expStr, "-", ".");
+   if(expStr < TimeToString(TimeCurrent(), TIME_DATE))
+   {
+      LicenseStatus = "라이센스 만료됨 (" + expStr + ")";
+      Print("라이센스 ERROR: ", LicenseStatus);
+      LicenseOK = false;
+      return(false);
+   }
+
+   // customer id 파싱
+   int is_ = StringFind(body1, "\"id\":\"") + 6;
+   string custId = "";
+   if(is_ > 5)
+   {
+      int ie = StringFind(body1, "\"", is_);
+      if(ie > is_) custId = StringSubstr(body1, is_, ie - is_);
+   }
+   if(custId == "")
+   {
+      LicenseStatus = "ID 파싱 실패";
+      Print("라이센스 ERROR: ", LicenseStatus);
+      LicenseOK = false;
+      return(false);
+   }
+
+   // ── Step 2: customer_programs에서 이 EA 할당 여부 확인 ──
+   string url2 = baseURL + "/rest/v1/customer_programs"
+               + "?customer_id=eq." + custId
+               + "&select=programs(name)";
+
+   char res2[];
+   string resHeaders2;
+   int ret2 = WebRequest("GET", url2, headers, 5000, req, res2, resHeaders2);
+   string body2 = CharArrayToString(res2);
+   Print("라이센스 Step2 HTTP=", ret2, " body=", body2);
+
+   if(ret2 != 200 || body2 == "[]")
+   {
+      LicenseStatus = "할당된 EA 없음";
+      Print("라이센스 ERROR: ", LicenseStatus);
+      LicenseOK = false;
+      return(false);
+   }
+
+   string body2L = body2; StringToLower(body2L);
+   string progL  = ProgramName; StringToLower(progL);
+   if(StringFind(body2L, progL) < 0)
+   {
+      LicenseStatus = "이 EA 미할당 (" + ProgramName + ")";
+      Print("라이센스 ERROR: ", LicenseStatus, " | 계좌=", acct);
+      LicenseOK = false;
+      return(false);
+   }
+
+   LicenseOK = true;
+   LicenseStatus = "라이센스 OK (만료: " + expStr + ")";
+   LastLicenseCheck = TimeCurrent();
+   Print("라이센스 OK: ", LicenseStatus);
+   return(true);
+}
+
 void OnTick()
 {
+   // 라이센스 체크 (1시간마다)
+   if(UseLicenseCheck)
+   {
+      if(TimeCurrent() - LastLicenseCheck >= 3600)
+      {
+         if(!CheckLicense())
+         {
+            Comment("HYPER BARCODE: " + LicenseStatus);
+            return;
+         }
+         Comment("");  // 성공 시 메시지 제거
+      }
+      
+      if(!LicenseOK)
+      {
+         Comment("HYPER BARCODE: 라이센스 없음. 거래 중지.");
+         return;
+      }
+   }
+   
    ProcessEA();
    DrawVisualObjects();
    DrawControlButtons();
@@ -351,21 +441,11 @@ void OnTick()
 
 void OnTimer()
 {
-   if(TimeCurrent()-마지막라이센스체크 >= 3600) {
-      마지막라이센스체크 = TimeCurrent();
-      if(!CheckLicense()) {
-         if(licenseOK) { licenseOK=false; CloseAllEAOrders(); EAStopped=true; }
-         DrawPanel();
-         return;
-      }
-      licenseOK = true;
-   }
    ProcessEA();
    DrawVisualObjects();
    DrawControlButtons();
    DrawTargetLine();
    DrawPanel();
-   if(licenseOK && SendBalance) SendBalanceToSupabase();
 }
 
 
@@ -454,9 +534,6 @@ void OnChartEvent(const int id,
 // =========================
 void ProcessEA()
 {
-   if(!licenseOK)
-      return;
-
    if(EAStopped)
       return;
 
@@ -1254,8 +1331,8 @@ bool IsHistoricalHitShift(int targetShift)
    if(lookback < 5)
       return false;
 
-   int sigShift[512]; ArrayInitialize(sigShift,0);
-   int sigDir[512];   ArrayInitialize(sigDir,0);
+   int sigShift[512];
+   int sigDir[512];
    int sigCount = 0;
 
    // Collect barcode signals from old to new.
@@ -1287,10 +1364,10 @@ bool IsHistoricalHitShift(int targetShift)
    if(sigCount <= 0)
       return false;
 
-   int    posType[512];  ArrayInitialize(posType,0);
-   double posLot[512];   ArrayInitialize(posLot,0);
-   double posPrice[512]; ArrayInitialize(posPrice,0);
-   int    posSignalShift[512]; ArrayInitialize(posSignalShift,0);
+   int    posType[512];
+   double posLot[512];
+   double posPrice[512];
+   int    posSignalShift[512];
    int    posCount = 0;
 
    int lineCount = 0;
@@ -1411,8 +1488,8 @@ void CalculateHitLineStats(int &hit1, int &hit2, int &hit3, int &hit4, int &hit5
    if(lookback < 5)
       return;
 
-   int sigShift[512]; ArrayInitialize(sigShift,0);
-   int sigDir[512];   ArrayInitialize(sigDir,0);
+   int sigShift[512];
+   int sigDir[512];
    int sigCount = 0;
 
    // Collect barcode signals from old to new.
@@ -1444,9 +1521,9 @@ void CalculateHitLineStats(int &hit1, int &hit2, int &hit3, int &hit4, int &hit5
    if(sigCount <= 0)
       return;
 
-   int    posType[512];  ArrayInitialize(posType,0);
-   double posLot[512];   ArrayInitialize(posLot,0);
-   double posPrice[512]; ArrayInitialize(posPrice,0);
+   int    posType[512];
+   double posLot[512];
+   double posPrice[512];
    int    posCount = 0;
 
    int lineCount = 0;
@@ -1559,8 +1636,8 @@ void CalculateHitLineDirectionStats(int &b1, int &s1, int &b2, int &s2, int &b3,
    if(lookback < 5)
       return;
 
-   int sigShift[512]; ArrayInitialize(sigShift,0);
-   int sigDir[512];   ArrayInitialize(sigDir,0);
+   int sigShift[512];
+   int sigDir[512];
    int sigCount = 0;
 
    for(int shift = lookback; shift >= 1; shift--)
@@ -1591,10 +1668,10 @@ void CalculateHitLineDirectionStats(int &b1, int &s1, int &b2, int &s2, int &b3,
    if(sigCount <= 0)
       return;
 
-   int    posType[512];  ArrayInitialize(posType,0);
-   double posLot[512];   ArrayInitialize(posLot,0);
-   double posPrice[512]; ArrayInitialize(posPrice,0);
-   int    posSignalDir[512]; ArrayInitialize(posSignalDir,0);
+   int    posType[512];
+   double posLot[512];
+   double posPrice[512];
+   int    posSignalDir[512];
    int    posCount = 0;
 
    int lineCount = 0;
