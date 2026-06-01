@@ -1227,9 +1227,12 @@ async function loadBalancesGlobal() {
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
 
-  // 두 쿼리 동시 실행
+  // 최신 잔고 + 전일 잔고 동시 조회 (latest_balances 뷰 불필요)
   const [latestRes, prevRes] = await Promise.allSettled([
-    sb.from('latest_balances').select('*'),
+    sb.from('balance_logs')
+      .select('account_no, balance, equity, profit, logged_at')
+      .order('logged_at', { ascending: false })
+      .limit(500),
     sb.from('balance_logs')
       .select('account_no, balance, logged_at')
       .lt('logged_at', todayStart.toISOString())
@@ -1237,9 +1240,12 @@ async function loadBalancesGlobal() {
       .order('logged_at', { ascending: false })
   ]);
 
+  // 계좌별 가장 최신 1건만 유지
   balMap = {};
   if (latestRes.status === 'fulfilled' && latestRes.value.data) {
-    latestRes.value.data.forEach(b => { balMap[b.account_no] = b; });
+    latestRes.value.data.forEach(b => {
+      if (!balMap[b.account_no]) balMap[b.account_no] = b;
+    });
   }
 
   prevBalMap = {};
