@@ -752,7 +752,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <!-- CUSTOMERS -->
         <div class="page" id="page-customers">
           <div class="search-row">
-            <input class="search-input" id="search-input" placeholder="이름, 계좌번호, 텔레그램 검색…" oninput="filterCustomers()" />
+            <input class="search-input" id="search-input" placeholder="이름, 계좌번호 검색…" oninput="filterCustomers()" />
             <select class="filter-select" id="filter-status" onchange="filterCustomers()">
               <option value="all">전체 상태</option>
               <option value="active">활성</option>
@@ -772,7 +772,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
               <thead><tr>
                 <th style="width:70px">이름</th>
                 <th style="width:105px">계좌번호</th>
-                <th style="width:90px">텔레그램</th>
                 <th style="width:88px">프로그램</th>
                 <th style="width:70px">잔고</th>
                 <th style="width:55px">전일대비</th>
@@ -781,20 +780,19 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:70px">상태</th>
                 <th style="width:90px">액션</th>
               </tr></thead>
-              <tbody id="customers-table"><tr><td colspan="10" class="loading">불러오는 중</td></tr></tbody>
+              <tbody id="customers-table"><tr><td colspan="9" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
         </div>
 
         <!-- EXPIRY -->
         <div class="page" id="page-expiry">
-          <div class="alert-box" style="width:100%">⚠ 아래 고객들의 라이선스가 7일 이내 만료됩니다. 텔레그램으로 연락 후 갱신 처리하세요.</div>
+          <div class="alert-box" style="width:100%">⚠ 아래 고객들의 라이선스가 7일 이내 만료됩니다. 연락 후 갱신 처리하세요.</div>
           <div class="table-wrap">
             <table style="table-layout:auto">
               <thead><tr>
                 <th>이름</th>
                 <th>계좌번호</th>
-                <th>텔레그램</th>
                 <th>프로그램</th>
                 <th>잔고</th>
                 <th>만료일</th>
@@ -897,10 +895,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <label class="form-label">MT4 계좌번호</label>
         <input class="form-input" id="f-account" placeholder="12345678" style="margin:0" />
       </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">텔레그램 아이디</label>
-      <input class="form-input" id="f-telegram" placeholder="@username" style="margin:0" />
     </div>
     <div class="form-grid">
       <div class="form-group">
@@ -1035,10 +1029,6 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <label class="form-label">MT4 계좌번호</label>
         <input class="form-input" id="edit-account" style="margin:0" />
       </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">텔레그램 아이디</label>
-      <input class="form-input" id="edit-telegram" placeholder="@username" style="margin:0" />
     </div>
     <div class="form-grid">
       <div class="form-group">
@@ -1182,11 +1172,11 @@ function startApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
-  // 잔고 60초마다 자동 갱신
+  // 잔고 5분마다 자동 갱신
   setInterval(async () => {
     await loadBalancesGlobal();
     renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  }, 60000);
+  }, 300000);
 }
 
 /* ── DATA LOADING ── */
@@ -1212,48 +1202,77 @@ async function loadCustomerPrograms() {
   try {
     const { data, error } = await sb.from('customer_programs')
       .select('customer_id, programs(id, name)');
-    if (error) return;
+    if (error) { console.error('[loadCustomerPrograms] error:', error); return; }
+    if (!data || data.length === 0) { console.warn('[loadCustomerPrograms] no data returned'); return; }
     customerPrograms = {};
     (data || []).forEach(r => {
       if (!r.programs) return;
       if (!customerPrograms[r.customer_id]) customerPrograms[r.customer_id] = [];
       customerPrograms[r.customer_id].push({ id: r.programs.id, name: r.programs.name });
     });
-  } catch(e) {}
+  } catch(e) { console.error('[loadCustomerPrograms] exception:', e); }
 }
 
 async function loadBalancesGlobal() {
+  const CACHE_KEY = 'axion_bal_v1';
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
 
-  // 최신 잔고 + 전일 잔고 동시 조회 (latest_balances 뷰 불필요)
-  const [latestRes, prevRes] = await Promise.allSettled([
-    sb.from('balance_logs')
-      .select('account_no, balance, equity, profit, logged_at')
-      .order('logged_at', { ascending: false })
-      .limit(500),
-    sb.from('balance_logs')
-      .select('account_no, balance, logged_at')
-      .lt('logged_at', todayStart.toISOString())
-      .gte('logged_at', yesterdayStart.toISOString())
-      .order('logged_at', { ascending: false })
-  ]);
+  // localStorage 캐시 즉시 복원 (새로고침 깜빡임 방지)
+  try {
+    const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+    if (cached && Date.now() - cached.ts < 10 * 60 * 1000) {
+      if (!Object.keys(balMap).length) {
+        balMap    = cached.b  || {};
+        prevBalMap = cached.p || {};
+      }
+    }
+  } catch(e) {}
 
-  // 계좌별 가장 최신 1건만 유지
-  balMap = {};
-  if (latestRes.status === 'fulfilled' && latestRes.value.data) {
-    latestRes.value.data.forEach(b => {
-      if (!balMap[b.account_no]) balMap[b.account_no] = b;
-    });
+  // ── 최신 잔고: latest_balances view (계좌별 최신 1행만 존재) ──
+  const { data: latestData, error: latestErr } = await sb
+    .from('latest_balances')
+    .select('account_no, balance, equity, profit, logged_at');
+
+  if (latestErr) {
+    console.error('[잔고] latest_balances 조회 실패:', latestErr.message,
+      '→ RLS 또는 view 미생성 확인. balance_logs fallback 사용.');
+    // fallback: balance_logs 최근 2시간 + 기간 bounded
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const { data: fb, error: fbErr } = await sb.from('balance_logs')
+      .select('account_no, balance, equity, profit, logged_at')
+      .gte('logged_at', twoHoursAgo.toISOString())
+      .order('logged_at', { ascending: false })
+      .limit(500);
+    if (fbErr) console.error('[잔고] fallback도 실패:', fbErr.message);
+    else if (fb) { balMap = {}; fb.forEach(b => { if (!balMap[b.account_no]) balMap[b.account_no] = b; }); }
+  } else if (!latestData || latestData.length === 0) {
+    console.warn('[잔고] latest_balances 데이터 없음 — EA 실행 여부 확인');
+  } else {
+    balMap = {};
+    latestData.forEach(b => { balMap[b.account_no] = b; });
   }
 
+  // ── 전일 잔고: balance_logs에서 기간 + limit 제한 조회 ──
+  const { data: prevData, error: prevErr } = await sb.from('balance_logs')
+    .select('account_no, balance, logged_at')
+    .lt('logged_at', todayStart.toISOString())
+    .gte('logged_at', yesterdayStart.toISOString())
+    .order('logged_at', { ascending: false })
+    .limit(500);
+  if (prevErr) console.error('[전일대비] balance_logs 조회 실패:', prevErr.message);
   prevBalMap = {};
-  if (prevRes.status === 'fulfilled' && prevRes.value.data) {
-    prevRes.value.data.forEach(b => {
+  if (prevData) {
+    prevData.forEach(b => {
       if (!prevBalMap[b.account_no]) prevBalMap[b.account_no] = { prev_balance: b.balance };
     });
   }
+
+  // 캐시 저장
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ b: balMap, p: prevBalMap, ts: Date.now() }));
+  } catch(e) {}
 }
 
 async function loadPartnerPrograms() {
@@ -1364,7 +1383,7 @@ function renderDashboard() {
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td>${(customerPrograms[c.id]||[]).map(p=>`<span class="prog-tag">${p.name}</span>`).join(' ') || `<span class="prog-tag">${c.progName}</span>`}</td>
-      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
+      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '데이터 대기 중'}</td>
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
       <td>${statusBadge(c.status)}</td>
     </tr>`;
@@ -1374,13 +1393,13 @@ function renderDashboard() {
 function renderCustomers(list) {
   list = list || allCustomers;
   const teamCol = isSuperAdmin ? c => `<td><span class="team-tag">${c.team_name || '—'}</span></td>` : () => '';
-  const colSpan = isSuperAdmin ? 12 : 11;
+  const colSpan = isSuperAdmin ? 11 : 10;
 
   document.getElementById('customers-table').innerHTML = list.length ? list.map(c => {
     const b = balMap[c.account_no];
     const p = prevBalMap[c.account_no];
     const dailyChg = (b && p) ? Number(b.balance) - Number(p.prev_balance) : null;
-    const balTd    = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>`;
+    const balTd    = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '데이터 대기 중'}</td>`;
     const profitTd = `<td style="font-size:12px;color:${dailyChg !== null ? (dailyChg >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
       ${dailyChg !== null ? (dailyChg >= 0 ? '+' : '') + '$' + dailyChg.toFixed(2) : '—'}</td>`;
     const progs = customerPrograms[c.id] || [];
@@ -1390,7 +1409,6 @@ function renderCustomers(list) {
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
-      <td class="tg-link">${c.telegram_id || '—'}</td>
       <td style="max-width:120px">${progTd}<br><button class="btn-sm" style="margin-top:4px;font-size:8px;padding:2px 7px" onclick='openManageEA("${c.id}","${c.name}")'>관리</button></td>
       ${balTd}${profitTd}
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
@@ -1412,7 +1430,7 @@ function filterCustomers() {
   const pg = document.getElementById('filter-prog').value;
   const tm = isSuperAdmin ? document.getElementById('filter-team').value : 'all';
   let list = allCustomers.filter(c => {
-    const mQ = !q || c.name.toLowerCase().includes(q) || c.account_no.includes(q) || (c.telegram_id||'').toLowerCase().includes(q);
+    const mQ = !q || c.name.toLowerCase().includes(q) || c.account_no.includes(q);
     const mS = st === 'all' || c.status === st;
     const mP = pg === 'all' || c.program_id === pg;
     const mT = tm === 'all' || c.team_name === tm;
@@ -1428,9 +1446,8 @@ function renderExpiry() {
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
-      <td class="tg-link">${c.telegram_id || '—'}</td>
       <td><span class="prog-tag">${c.progName}</span></td>
-      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '미수신'}</td>
+      <td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '데이터 대기 중'}</td>
       <td style="font-size:11px">${fmtDate(c.expires_at)}</td>
       <td>${dDay(c.daysLeft)}</td>
       <td><button class="btn-sm btn-sm-amber" onclick='openExtend("${c.id}","${c.name}","${fmtDate(c.expires_at)}")'>연장</button></td>
@@ -1457,7 +1474,7 @@ async function renderStats() {
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td><span class="prog-tag">${c.progName}</span></td>
-      <td style="font-weight:600">${b ? fmtMoney(b.balance) : '<span style="color:var(--text3)">미수신</span>'}</td>
+      <td style="font-weight:600">${b ? fmtMoney(b.balance) : '<span style="color:var(--text3)">데이터 대기 중</span>'}</td>
       <td>${profitCell}</td>
       <td style="font-size:10px;color:var(--text3)">${b ? new Date(b.logged_at).toLocaleString('ko-KR') : '—'}</td>
     </tr>`;
@@ -1467,7 +1484,7 @@ async function renderStats() {
   document.getElementById('s-avg').textContent        = chgCount
     ? (totalDailyChg >= 0 ? '+' : '') + '$' + (totalDailyChg / chgCount).toFixed(2) : '—';
   document.getElementById('s-last-update').textContent = lastUpdate
-    ? new Date(lastUpdate).toLocaleTimeString('ko-KR') : '미수신';
+    ? new Date(lastUpdate).toLocaleTimeString('ko-KR') : '데이터 대기 중';
 }
 
 function renderPartners() {
@@ -1524,7 +1541,6 @@ async function addCustomer() {
   const payload = {
     name:            document.getElementById('f-name').value.trim(),
     account_no:      document.getElementById('f-account').value.trim(),
-    telegram_id:     document.getElementById('f-telegram').value.trim(),
     program_id:      document.getElementById('f-program').value || null,
     program_name:    progName,
     team_name:       currentTeam,
@@ -1586,12 +1602,13 @@ async function addCustomer() {
 
     closeModals();
 
-    ['f-name','f-account','f-telegram'].forEach(id => {
+    ['f-name','f-account'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
 
-    await Promise.all([loadCustomers(), loadCustomerPrograms(), loadBalancesGlobal()]);
+    await Promise.all([loadCustomers(), loadCustomerPrograms()]);
+    await loadBalancesGlobal();
     renderCustomers();
     renderDashboard();
     renderExpiry();
@@ -1669,8 +1686,6 @@ function openEdit(id) {
   document.getElementById('edit-id').value       = id;
   document.getElementById('edit-name').value     = c.name || '';
   document.getElementById('edit-account').value  = c.account_no || '';
-  document.getElementById('edit-telegram').value = c.telegram_id || '';
-
   const visible = (myAllowedProgIds && !isSuperAdmin)
     ? allPrograms.filter(p => myAllowedProgIds.includes(p.id))
     : allPrograms;
@@ -1689,7 +1704,6 @@ async function saveEdit() {
   const payload  = {
     name:            document.getElementById('edit-name').value.trim(),
     account_no:      document.getElementById('edit-account').value.trim(),
-    telegram_id:     document.getElementById('edit-telegram').value.trim(),
     program_id:      progSel.value || null,
     program_name:    progName,
   };
@@ -1778,11 +1792,14 @@ async function removeEAFromCustomer(customerId, programId) {
     .delete().eq('customer_id', customerId).eq('program_id', programId);
   if (error) { await showAlert('EA 제거 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
 
-  // 남은 EA 중 마지막 것으로 program_name 업데이트 (없으면 null)
-  const remaining = (customerPrograms[customerId] || []).filter(p => p.id !== programId);
-  const newName = remaining.length > 0 ? remaining[remaining.length - 1].name : null;
+  // DB에서 직접 남은 EA 조회 (JS 캐시 의존 제거 → is_active 오작동 방지)
+  const { data: remaining } = await sb.from('customer_programs')
+    .select('programs(name)')
+    .eq('customer_id', customerId);
+  const hasPrograms = remaining && remaining.length > 0;
+  const newName = hasPrograms ? (remaining[remaining.length - 1].programs?.name || null) : null;
   await sb.from('customers')
-    .update({ program_name: newName, is_active: !!newName })
+    .update({ program_name: newName, is_active: hasPrograms })
     .eq('id', customerId);
 
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);

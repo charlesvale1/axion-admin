@@ -97,6 +97,7 @@ double   g_sessionStartEq= 0;
 bool     licenseOK           = false;
 string   licenseStatus       = "확인 중...";
 datetime 마지막라이센스체크  = 0;
+datetime 마지막잔고전송      = 0;
 bool     buyStopped      = false;
 bool     sellStopped     = false;
 bool     finalStopped    = false;
@@ -493,9 +494,13 @@ bool CheckLicense()
    if(_exp<TimeToString(TimeCurrent(),TIME_DATE))
    { licenseStatus="만료됨 ("+_exp+")"; return false; }
 
-   int    _si     = StringFind(_body1,"\"id\":\"")+6;
-   int    _ei     = StringFind(_body1,"\"",_si);
-   string _custId = StringSubstr(_body1,_si,_ei-_si);
+   string _custId = "";
+   { int _ip=StringFind(_body1,"\"id\":");
+     if(_ip>=0){ int _vs=_ip+5;
+       if(StringGetCharacter(_body1,_vs)=='"'){ _vs++; int _ve=StringFind(_body1,"\"",_vs); if(_ve>_vs) _custId=StringSubstr(_body1,_vs,_ve-_vs); }
+       else { int _ve=_vs; while(_ve<StringLen(_body1)){ ushort _c=StringGetCharacter(_body1,_ve); if(_c<'0'||_c>'9') break; _ve++; } if(_ve>_vs) _custId=StringSubstr(_body1,_vs,_ve-_vs); }
+     }
+   }
 
    // ── 2단계: customer_programs 에서 EA 권한 확인 ──
    char _r2[]; string _rhs2;
@@ -1014,6 +1019,10 @@ void OnTimer()
    }
 
    ProcessTrading();
-   if(licenseOK && SendBalance) SendBalanceToSupabase();
+   if(licenseOK && SendBalance && TimeCurrent()-마지막잔고전송 >= SendBalanceMinutes*60)
+   {
+      마지막잔고전송 = TimeCurrent();
+      SendBalanceToSupabase();
+   }
 }
 //+------------------------------------------------------------------+

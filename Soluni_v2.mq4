@@ -88,11 +88,11 @@ bool CheckLicense()
    int idp=StringFind(body1,"\"id\":");
    if(idp>=0)
    {
-      int vs=idp+5;
+      int vs=idp+5; int ve=0;
       if(StringGetCharacter(body1,vs)=='"')
-      { vs++; int ve=StringFind(body1,"\"",vs); if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
+      { vs++; ve=StringFind(body1,"\"",vs); if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
       else
-      { int ve=vs; while(ve<StringLen(body1)){ ushort c=StringGetCharacter(body1,ve); if(c<'0'||c>'9') break; ve++; } if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
+      { ve=vs; while(ve<StringLen(body1)){ ushort c=StringGetCharacter(body1,ve); if(c<'0'||c>'9') break; ve++; } if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
    }
    if(custId=="") { LicenseStatus="ID 파싱 실패"; LicenseOK=false; return(false); }
 
@@ -250,8 +250,7 @@ int init()
    {
       Comment("Soluni v2: "+LicenseStatus+"\nAxion Research 파트너 페이지에서 권한을 신청하세요.");
       Alert("Soluni v2: 라이센스 없음. Axion Research 파트너 페이지에서 권한 신청 필요.");
-      ExpertRemove();
-      return(-1);
+      return(0);
    }
    Comment("");
 
@@ -271,9 +270,8 @@ int init()
    {
       RiskNoticeAccepted = false;
       Print("[Soluni v2] EA 실행이 취소되었습니다.");
-      Comment("Soluni v2: 투자위험 고지 미동의. EA 종료.");
-      ExpertRemove();
-      return(-1);
+      Comment("Soluni v2: 투자위험 고지 미동의. 매매 차단.");
+      return(0);
    }
    RiskNoticeAccepted = true;
    return(0);
