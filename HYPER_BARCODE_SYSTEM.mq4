@@ -288,158 +288,70 @@ void OnDeinit(const int reason)
 
 void SendBalanceToSupabase()
 {
-   string anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
-   string acc  = IntegerToString((int)AccountNumber());
+   string acc  = (StringLen(LicenseAccountNo)>0) ? LicenseAccountNo : IntegerToString((int)AccountNumber());
    string body = "{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+
                  ",\"equity\":"+DoubleToString(AccountEquity(),2)+
                  ",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
-   string h = "Content-Type: application/json\r\napikey: "+anonKey+
-              "\r\nAuthorization: Bearer "+anonKey+"\r\nPrefer: return=minimal";
    char p[]; char r[]; string rh;
    StringToCharArray(body,p,0,StringLen(body)); ArrayResize(p,StringLen(body));
-   WebRequest("POST","https://wmvnearoursbmwjqwzww.supabase.co/rest/v1/balance_logs",h,5000,p,r,rh);
+   WebRequest("POST","https://wmvnearoursbmwjqwzww.supabase.co/functions/v1/submit-balance",
+              "Content-Type: application/json\r\n",5000,p,r,rh);
 }
 
 //+------------------------------------------------------------------+
-//| 라이센스 체크 함수 (Axion Research 파트너 페이지)
+//| 라이센스 체크 함수 — Edge Function 방식 (anon 키로 DB 직접 노출 없음)
 //+------------------------------------------------------------------+
 bool CheckLicense()
 {
    if(!UseLicenseCheck)
-   {
-      LicenseOK = true;
-      LicenseStatus = "라이센스 체크 안 함";
-      return(true);
-   }
+   { LicenseOK=true; LicenseStatus="라이센스 체크 안 함"; return(true); }
 
-   // 1시간마다 재확인
-   if(LicenseOK && TimeCurrent() - LastLicenseCheck < 3600)
+   if(LicenseOK && TimeCurrent()-LastLicenseCheck < 3600)
       return(true);
 
-   string acct = LicenseAccountNo;
-   if(StringLen(acct) == 0)
-      acct = IntegerToString(AccountNumber());
+   string acct = (StringLen(LicenseAccountNo)>0) ? LicenseAccountNo : IntegerToString((int)AccountNumber());
+   string body = "{\"account_no\":\""+acct+"\",\"program_name\":\""+ProgramName+"\"}";
+   char req[]; char res[]; string rh;
+   StringToCharArray(body,req,0,StringLen(body)); ArrayResize(req,StringLen(body));
 
-   string anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
-   string baseURL = "https://wmvnearoursbmwjqwzww.supabase.co";
-   string headers = "apikey: " + anonKey + "\r\n"
-                  + "Authorization: Bearer " + anonKey + "\r\n"
-                  + "Content-Type: application/json";
-   char req[], res1[];
-   string resHeaders;
+   int ret = WebRequest("POST",
+                        "https://wmvnearoursbmwjqwzww.supabase.co/functions/v1/check-license",
+                        "Content-Type: application/json\r\n",
+                        10000, req, res, rh);
 
-   // ── Step 1: account_no + is_active 확인, id + expires_at 취득 ──
-   string url1 = baseURL + "/rest/v1/customers"
-               + "?account_no=eq." + acct
-               + "&is_active=eq.true"
-               + "&select=id,expires_at";
-
-   int ret1 = WebRequest("GET", url1, headers, 5000, req, res1, resHeaders);
-   if(ret1 < 0)
+   if(ret < 0)
    {
       int err = GetLastError();
-      if(err == 4060)
+      if(err==4060)
       {
          LicenseStatus = "WebRequest URL 미등록. MT4 설정 필요.";
-         Print("라이센스 ERROR: ", LicenseStatus);
-         Print("라이센스 ERROR: MT4 → 도구 → 옵션 → Expert Advisors → WebRequest URL 추가:");
-         Print("라이센스 ERROR: ", baseURL);
+         Print("라이센스 ERROR: MT4→도구→옵션→EA→WebRequest URL 추가: https://wmvnearoursbmwjqwzww.supabase.co");
       }
-      else
-         LicenseStatus = "네트워크 오류 (err=" + IntegerToString(err) + ")";
+      else LicenseStatus = "네트워크 오류 (err="+IntegerToString(err)+")";
       Print("라이센스 ERROR: ", LicenseStatus);
-      LicenseOK = false;
-      return(false);
+      LicenseOK = false; return(false);
    }
 
-   string body1 = CharArrayToString(res1);
-   Print("라이센스 Step1 HTTP=", ret1, " body=", body1);
+   string resp = CharArrayToString(res);
+   Print("라이센스 체크 HTTP=", ret, " body=", resp);
 
-   if(ret1 != 200 || body1 == "[]" || StringFind(body1, "expires_at") < 0)
+   if(ret!=200 || StringFind(resp,"\"authorized\":true")<0)
    {
-      LicenseStatus = "미등록/비활성 계좌 (HTTP=" + IntegerToString(ret1) + ")";
-      Print("라이센스 ERROR: ", LicenseStatus, " | 계좌=", acct);
+      string reason = "라이센스 없음";
+      int rp = StringFind(resp,"\"reason\":\"");
+      if(rp>=0){ rp+=10; int re=StringFind(resp,"\"",rp); if(re>rp) reason=StringSubstr(resp,rp,re-rp); }
+      LicenseStatus = reason;
       LicenseOK = false;
-      return(false);
-   }
-
-   // 만료일 파싱
-   int es = StringFind(body1, "\"expires_at\":\"") + 14;
-   string expStr = StringSubstr(body1, es, 10);
-   StringReplace(expStr, "-", ".");
-   if(expStr < TimeToString(TimeCurrent(), TIME_DATE))
-   {
-      LicenseStatus = "라이센스 만료됨 (" + expStr + ")";
       Print("라이센스 ERROR: ", LicenseStatus);
-      LicenseOK = false;
       return(false);
    }
 
-   // customer id 파싱 (UUID 문자열 / 정수형 모두 처리)
-   string custId = "";
-   int idPos = StringFind(body1, "\"id\":");
-   if(idPos >= 0)
-   {
-      int vStart = idPos + 5;
-      if(StringGetCharacter(body1, vStart) == '"')
-      {
-         // UUID 타입: "id":"xxxxxxxx-..."
-         vStart++;
-         int vEnd = StringFind(body1, "\"", vStart);
-         if(vEnd > vStart) custId = StringSubstr(body1, vStart, vEnd - vStart);
-      }
-      else
-      {
-         // 정수 타입: "id":12345
-         int vEnd = vStart;
-         while(vEnd < StringLen(body1))
-         {
-            ushort c = StringGetCharacter(body1, vEnd);
-            if(c < '0' || c > '9') break;
-            vEnd++;
-         }
-         if(vEnd > vStart) custId = StringSubstr(body1, vStart, vEnd - vStart);
-      }
-   }
-   if(custId == "")
-   {
-      LicenseStatus = "ID 파싱 실패";
-      Print("라이센스 ERROR: ", LicenseStatus);
-      LicenseOK = false;
-      return(false);
-   }
-
-   // ── Step 2: customer_programs에서 이 EA 할당 여부 확인 ──
-   string url2 = baseURL + "/rest/v1/customer_programs"
-               + "?customer_id=eq." + custId
-               + "&select=programs(name)";
-
-   char res2[];
-   string resHeaders2;
-   int ret2 = WebRequest("GET", url2, headers, 5000, req, res2, resHeaders2);
-   string body2 = CharArrayToString(res2);
-   Print("라이센스 Step2 HTTP=", ret2, " body=", body2);
-
-   if(ret2 != 200 || body2 == "[]")
-   {
-      LicenseStatus = "할당된 EA 없음";
-      Print("라이센스 ERROR: ", LicenseStatus);
-      LicenseOK = false;
-      return(false);
-   }
-
-   string body2L = body2; StringToLower(body2L);
-   string progL  = ProgramName; StringToLower(progL);
-   if(StringFind(body2L, progL) < 0)
-   {
-      LicenseStatus = "이 EA 미할당 (" + ProgramName + ")";
-      Print("라이센스 ERROR: ", LicenseStatus, " | 계좌=", acct);
-      LicenseOK = false;
-      return(false);
-   }
+   string expStr = "";
+   int ep = StringFind(resp,"\"expires_at\":\"");
+   if(ep>=0) expStr = StringSubstr(resp,ep+14,10);
 
    LicenseOK = true;
-   LicenseStatus = "라이센스 OK (만료: " + expStr + ")";
+   LicenseStatus = "라이센스 OK" + (StringLen(expStr)>0 ? " (만료: "+expStr+")" : "");
    LastLicenseCheck = TimeCurrent();
    Print("라이센스 OK: ", LicenseStatus);
    return(true);

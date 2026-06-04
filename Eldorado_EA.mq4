@@ -472,53 +472,44 @@ void ProcessTrading()
 //+------------------------------------------------------------------+
 bool CheckLicense()
 {
-   string _acc = IntegerToString((int)AccountNumber());
-   string _rh  = "apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
+   string _acc  = IntegerToString((int)AccountNumber());
+   string _body = "{\"account_no\":\""+_acc+"\",\"program_name\":\""+프로그램명+"\"}";
    char _p[]; char _r[]; string _rhs;
+   StringToCharArray(_body,_p,0,StringLen(_body)); ArrayResize(_p,StringLen(_body));
 
-   // ── 1단계: 계좌 활성 여부 + 만료일 + customer id ──
-   string _url1 = 서버주소+"/rest/v1/customers"
-                + "?account_no=eq."+_acc
-                + "&is_active=eq.true"
-                + "&select=id,expires_at";
-   int _http1 = WebRequest("GET",_url1,_rh,8000,_p,_r,_rhs);
-   string _body1 = CharArrayToString(_r);
-   Print("Eldorado License step1 HTTP=",_http1," body=",_body1);
+   int _http = WebRequest("POST",
+                          서버주소+"/functions/v1/check-license",
+                          "Content-Type: application/json\r\n",
+                          10000, _p, _r, _rhs);
 
-   if(_http1!=200||_body1=="[]"||StringFind(_body1,"expires_at")<0)
-   { licenseStatus="미등록 계좌 또는 라이선스 정지 (HTTP="+IntegerToString(_http1)+")"; return false; }
-
-   int    _ps  = StringFind(_body1,"\"expires_at\":\"")+14;
-   string _exp = StringSubstr(_body1,_ps,10);
-   StringReplace(_exp,"-",".");
-   if(_exp<TimeToString(TimeCurrent(),TIME_DATE))
-   { licenseStatus="만료됨 ("+_exp+")"; return false; }
-
-   string _custId = "";
-   { int _ip=StringFind(_body1,"\"id\":");
-     if(_ip>=0){ int _vs=_ip+5;
-       if(StringGetCharacter(_body1,_vs)=='"'){ _vs++; int _ve=StringFind(_body1,"\"",_vs); if(_ve>_vs) _custId=StringSubstr(_body1,_vs,_ve-_vs); }
-       else { int _ve=_vs; while(_ve<StringLen(_body1)){ ushort _c=StringGetCharacter(_body1,_ve); if(_c<'0'||_c>'9') break; _ve++; } if(_ve>_vs) _custId=StringSubstr(_body1,_vs,_ve-_vs); }
-     }
+   if(_http < 0)
+   {
+      int _e = GetLastError();
+      if(_e==4060) licenseStatus="WebRequest URL 미등록. MT4 설정 필요. ("+서버주소+")";
+      else licenseStatus="네트워크 오류 (err="+IntegerToString(_e)+")";
+      Print("Eldorado 라이센스 ERROR: ",licenseStatus);
+      return false;
    }
 
-   // ── 2단계: customer_programs 에서 EA 권한 확인 ──
-   char _r2[]; string _rhs2;
-   string _url2 = 서버주소+"/rest/v1/customer_programs"
-                + "?customer_id=eq."+_custId
-                + "&select=programs(name)";
-   int _http2 = WebRequest("GET",_url2,_rh,8000,_p,_r2,_rhs2);
-   string _body2  = CharArrayToString(_r2);
-   string _body2L = _body2;
-   string _progL  = 프로그램명;
-   StringToLower(_body2L);
-   StringToLower(_progL);
-   Print("Eldorado License step2 HTTP=",_http2," body=",_body2);
+   string _resp = CharArrayToString(_r);
+   Print("Eldorado 라이센스 HTTP=",_http," body=",_resp);
 
-   if(_http2!=200||StringFind(_body2L,_progL)<0)
-   { licenseStatus="이 EA 권한 없음 ("+프로그램명+") - 관리자 페이지에서 권한 신청 필요"; return false; }
+   if(_http!=200 || StringFind(_resp,"\"authorized\":true")<0)
+   {
+      string _reason = "라이센스 없음";
+      int _rp = StringFind(_resp,"\"reason\":\"");
+      if(_rp>=0){ _rp+=10; int _re=StringFind(_resp,"\"",_rp); if(_re>_rp) _reason=StringSubstr(_resp,_rp,_re-_rp); }
+      licenseStatus = _reason;
+      Print("Eldorado 라이센스 ERROR: ",licenseStatus);
+      return false;
+   }
 
-   licenseStatus="정상 ("+_exp+"까지)";
+   string _expStr = "";
+   int _ep = StringFind(_resp,"\"expires_at\":\"");
+   if(_ep>=0) _expStr = StringSubstr(_resp,_ep+14,10);
+
+   licenseStatus = "정상 ("+_expStr+"까지)";
+   Print("Eldorado 라이센스 OK: ",licenseStatus);
    return true;
 }
 
@@ -526,10 +517,9 @@ void SendBalanceToSupabase()
 {
    string acc=IntegerToString((int)AccountNumber());
    string body="{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+",\"equity\":"+DoubleToString(AccountEquity(),2)+",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
-   string h="Content-Type: application/json\r\napikey: "+인증키+"\r\nAuthorization: Bearer "+인증키+"\r\nPrefer: return=minimal";
    char p[];char r[];string rh;
    StringToCharArray(body,p,0,StringLen(body));ArrayResize(p,StringLen(body));
-   WebRequest("POST",서버주소+"/rest/v1/balance_logs",h,5000,p,r,rh);
+   WebRequest("POST",서버주소+"/functions/v1/submit-balance","Content-Type: application/json\r\n",5000,p,r,rh);
 }
 
 //+------------------------------------------------------------------+

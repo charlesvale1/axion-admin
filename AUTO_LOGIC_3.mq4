@@ -475,48 +475,44 @@ void ProcessTrading()
 //+------------------------------------------------------------------+
 bool CheckLicense()
 {
-   string _acc = IntegerToString((int)AccountNumber());
-   string _rh  = "apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
+   string _acc  = IntegerToString((int)AccountNumber());
+   string _body = "{\"account_no\":\""+_acc+"\",\"program_name\":\""+프로그램명+"\"}";
    char _p[]; char _r[]; string _rhs;
+   StringToCharArray(_body,_p,0,StringLen(_body)); ArrayResize(_p,StringLen(_body));
 
-   // Step 1: account_no + is_active 확인, id + expires_at 취득
-   string _url1 = 서버주소+"/rest/v1/customers?account_no=eq."+_acc+"&is_active=eq.true&select=id,expires_at";
-   int _http1 = WebRequest("GET",_url1,_rh,8000,_p,_r,_rhs);
-   string _body1 = CharArrayToString(_r);
-   Print("AUTO LOGIC 3 License Step1 HTTP=",_http1," body=",_body1);
-   if(_http1!=200||_body1=="[]"||StringFind(_body1,"expires_at")<0)
-   { licenseStatus="미등록/비활성 계좌 (HTTP="+IntegerToString(_http1)+")"; return false; }
+   int _http = WebRequest("POST",
+                          서버주소+"/functions/v1/check-license",
+                          "Content-Type: application/json\r\n",
+                          10000, _p, _r, _rhs);
 
-   // 만료일 파싱
-   int _es = StringFind(_body1,"\"expires_at\":\"")+14;
-   string _exp = StringSubstr(_body1,_es,10); StringReplace(_exp,"-",".");
-   if(_exp < TimeToString(TimeCurrent(),TIME_DATE))
-   { licenseStatus="만료됨 ("+_exp+")"; return false; }
-
-   // customer_id 파싱
-   int _is = StringFind(_body1,"\"id\":\"")+6;
-   string _custId = "";
-   if(_is > 5) {
-      int _ie = StringFind(_body1,"\"",_is);
-      if(_ie > _is) _custId = StringSubstr(_body1,_is,_ie-_is);
+   if(_http < 0)
+   {
+      int _e = GetLastError();
+      if(_e==4060) licenseStatus="WebRequest URL 미등록. MT4 설정 필요. ("+서버주소+")";
+      else licenseStatus="네트워크 오류 (err="+IntegerToString(_e)+")";
+      Print("AUTO LOGIC 3 라이센스 ERROR: ",licenseStatus);
+      return false;
    }
-   if(_custId == "") { licenseStatus="ID 파싱 실패"; return false; }
 
-   // Step 2: customer_programs에서 이 EA 할당 여부 확인
-   char _r2[]; string _rhs2;
-   string _url2 = 서버주소+"/rest/v1/customer_programs?customer_id=eq."+_custId+"&select=programs(name)";
-   int _http2 = WebRequest("GET",_url2,_rh,8000,_p,_r2,_rhs2);
-   string _body2 = CharArrayToString(_r2);
-   Print("AUTO LOGIC 3 License Step2 HTTP=",_http2," body=",_body2);
-   if(_http2!=200||_body2=="[]")
-   { licenseStatus="미할당 프로그램"; return false; }
+   string _resp = CharArrayToString(_r);
+   Print("AUTO LOGIC 3 라이센스 HTTP=",_http," body=",_resp);
 
-   string _body2L = _body2; StringToLower(_body2L);
-   string _progL  = 프로그램명; StringToLower(_progL);
-   if(StringFind(_body2L,_progL)<0)
-   { licenseStatus="이 EA 미할당 ("+프로그램명+")"; return false; }
+   if(_http!=200 || StringFind(_resp,"\"authorized\":true")<0)
+   {
+      string _reason = "라이센스 없음";
+      int _rp = StringFind(_resp,"\"reason\":\"");
+      if(_rp>=0){ _rp+=10; int _re=StringFind(_resp,"\"",_rp); if(_re>_rp) _reason=StringSubstr(_resp,_rp,_re-_rp); }
+      licenseStatus = _reason;
+      Print("AUTO LOGIC 3 라이센스 ERROR: ",licenseStatus);
+      return false;
+   }
 
-   licenseStatus = "정상 ("+_exp+"까지)";
+   string _expStr = "";
+   int _ep = StringFind(_resp,"\"expires_at\":\"");
+   if(_ep>=0) _expStr = StringSubstr(_resp,_ep+14,10);
+
+   licenseStatus = "정상 ("+_expStr+"까지)";
+   Print("AUTO LOGIC 3 라이센스 OK: ",licenseStatus);
    return true;
 }
 
@@ -524,10 +520,9 @@ void SendBalanceToSupabase()
 {
    string acc=IntegerToString((int)AccountNumber());
    string body="{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+",\"equity\":"+DoubleToString(AccountEquity(),2)+",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
-   string h="Content-Type: application/json\r\napikey: "+인증키+"\r\nAuthorization: Bearer "+인증키+"\r\nPrefer: return=minimal";
    char p[];char r[];string rh;
    StringToCharArray(body,p,0,StringLen(body));ArrayResize(p,StringLen(body));
-   WebRequest("POST",서버주소+"/rest/v1/balance_logs",h,5000,p,r,rh);
+   WebRequest("POST",서버주소+"/functions/v1/submit-balance","Content-Type: application/json\r\n",5000,p,r,rh);
 }
 
 //+------------------------------------------------------------------+

@@ -53,66 +53,43 @@ bool CheckLicense()
    if(LicenseOK && TimeCurrent()-LastLicenseCheck < 3600)
       return(true);
 
-   string acct = LicenseAccountNo;
-   if(StringLen(acct)==0) acct = IntegerToString(AccountNumber());
+   string acct = (StringLen(LicenseAccountNo)>0) ? LicenseAccountNo : IntegerToString(AccountNumber());
+   string base = "https://wmvnearoursbmwjqwzww.supabase.co";
+   string body = "{\"account_no\":\""+acct+"\",\"program_name\":\""+ProgramName+"\"}";
+   char req[]; char res[]; string rh;
+   StringToCharArray(body,req,0,StringLen(body)); ArrayResize(req,StringLen(body));
 
-   string ak  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
-   string base= "https://wmvnearoursbmwjqwzww.supabase.co";
-   string hdr = "apikey: "+ak+"\r\nAuthorization: Bearer "+ak+"\r\nContent-Type: application/json";
-   char req[], res1[]; string rh;
-
-   // ── Step 1: 계좌 활성 확인 + id, expires_at 취득 ──
-   string url1 = base+"/rest/v1/customers?account_no=eq."+acct+"&is_active=eq.true&select=id,expires_at";
-   int ret1 = WebRequest("GET",url1,hdr,5000,req,res1,rh);
-   if(ret1<0)
+   int ret = WebRequest("POST", base+"/functions/v1/check-license",
+                        "Content-Type: application/json\r\n", 10000, req, res, rh);
+   if(ret<0)
    {
       int err=GetLastError();
-      LicenseStatus=(err==4060)?"WebRequest URL 미등록 (MT4 옵션에서 추가 필요)":"네트워크 오류 err="+IntegerToString(err);
+      LicenseStatus=(err==4060)?"WebRequest URL 미등록 (MT4 옵션에서 추가 필요: "+base+")":"네트워크 오류 err="+IntegerToString(err);
       Print("[Soluni v2] 라이센스 ERROR: ",LicenseStatus);
-      if(err==4060) Print("[Soluni v2] 추가 URL: ",base);
       LicenseOK=false; return(false);
    }
-   string body1=CharArrayToString(res1);
-   Print("[Soluni v2] Step1 HTTP=",ret1," body=",body1);
-   if(ret1!=200||body1=="[]"||StringFind(body1,"expires_at")<0)
-   { LicenseStatus="미등록/비활성 계좌"; Print("[Soluni v2] ERROR: ",LicenseStatus," 계좌=",acct); LicenseOK=false; return(false); }
 
-   // 만료일 파싱
-   int es=StringFind(body1,"\"expires_at\":\"")+14;
-   string expStr=StringSubstr(body1,es,10); StringReplace(expStr,"-",".");
-   if(expStr<TimeToString(TimeCurrent(),TIME_DATE))
-   { LicenseStatus="만료됨 ("+expStr+")"; LicenseOK=false; return(false); }
+   string resp=CharArrayToString(res);
+   Print("[Soluni v2] 라이센스 HTTP=",ret," body=",resp);
 
-   // id 파싱 (정수/UUID 모두 처리)
-   string custId="";
-   int idp=StringFind(body1,"\"id\":");
-   if(idp>=0)
+   if(ret!=200 || StringFind(resp,"\"authorized\":true")<0)
    {
-      int vs=idp+5; int ve=0;
-      if(StringGetCharacter(body1,vs)=='"')
-      { vs++; ve=StringFind(body1,"\"",vs); if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
-      else
-      { ve=vs; while(ve<StringLen(body1)){ ushort c=StringGetCharacter(body1,ve); if(c<'0'||c>'9') break; ve++; } if(ve>vs) custId=StringSubstr(body1,vs,ve-vs); }
+      string reason="라이센스 없음";
+      int rp=StringFind(resp,"\"reason\":\"");
+      if(rp>=0){ rp+=10; int re=StringFind(resp,"\"",rp); if(re>rp) reason=StringSubstr(resp,rp,re-rp); }
+      LicenseStatus=reason; LicenseOK=false;
+      Print("[Soluni v2] 라이센스 ERROR: ",LicenseStatus);
+      return(false);
    }
-   if(custId=="") { LicenseStatus="ID 파싱 실패"; LicenseOK=false; return(false); }
 
-   // ── Step 2: customer_programs에서 이 EA 할당 여부 확인 ──
-   char res2[]; string rh2;
-   string url2=base+"/rest/v1/customer_programs?customer_id=eq."+custId+"&select=programs(name)";
-   int ret2=WebRequest("GET",url2,hdr,5000,req,res2,rh2);
-   string body2=CharArrayToString(res2);
-   Print("[Soluni v2] Step2 HTTP=",ret2," body=",body2);
-   if(ret2!=200||body2=="[]")
-   { LicenseStatus="할당된 EA 없음"; LicenseOK=false; return(false); }
-   string b2L=body2; StringToLower(b2L);
-   string pL=ProgramName; StringToLower(pL);
-   if(StringFind(b2L,pL)<0)
-   { LicenseStatus="이 EA 미할당 ("+ProgramName+")"; Print("[Soluni v2] ERROR: ",LicenseStatus," 계좌=",acct); LicenseOK=false; return(false); }
+   string expStr="";
+   int ep=StringFind(resp,"\"expires_at\":\"");
+   if(ep>=0) expStr=StringSubstr(resp,ep+14,10);
 
    LicenseOK=true;
    LicenseStatus="OK (만료: "+expStr+")";
    LastLicenseCheck=TimeCurrent();
-   Print("[Soluni v2] 라이센스 OK 만료: ",expStr);
+   Print("[Soluni v2] 라이센스 OK: ",LicenseStatus);
    return(true);
 }
 
