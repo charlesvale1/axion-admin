@@ -279,12 +279,13 @@ int init()
 
 int start()
 {
-// Axion Research 라이센스 1시간마다 재확인
+// Axion Research 라이센스 재확인 (OK: 1시간 / 실패: 60초)
 if(UseLicenseCheck)
 {
-   if(TimeCurrent()-LastLicenseCheck >= 3600)
+   int _reChk = LicenseOK ? 3600 : 60;
+   if(TimeCurrent()-LastLicenseCheck >= _reChk)
    {
-      if(!CheckLicense()) { Comment("Soluni v2: "+LicenseStatus); return(0); }
+      if(!CheckLicense()) { Comment("Soluni v2: "+LicenseStatus+"\n(60초마다 자동 재확인 중...)"); return(0); }
       Comment("");
    }
    if(!LicenseOK) { Comment("Soluni v2: 라이센스 없음. 거래 중지."); return(0); }

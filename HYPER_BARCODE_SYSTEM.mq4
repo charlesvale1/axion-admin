@@ -447,19 +447,20 @@ bool CheckLicense()
 
 void OnTick()
 {
-   // 라이센스 체크 (1시간마다)
+   // 라이센스 체크 (OK 상태: 1시간마다 / 실패 상태: 60초마다 재확인)
    if(UseLicenseCheck)
    {
-      if(TimeCurrent() - LastLicenseCheck >= 3600)
+      int reCheckSec = LicenseOK ? 3600 : 60;
+      if(TimeCurrent() - LastLicenseCheck >= reCheckSec)
       {
          if(!CheckLicense())
          {
-            Comment("HYPER BARCODE: " + LicenseStatus);
+            Comment("HYPER BARCODE: " + LicenseStatus + "\n(60초마다 자동 재확인 중...)");
             return;
          }
          Comment("");  // 성공 시 메시지 제거
       }
-      
+
       if(!LicenseOK)
       {
          Comment("HYPER BARCODE: 라이센스 없음. 거래 중지.");

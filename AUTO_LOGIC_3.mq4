@@ -966,7 +966,8 @@ void OnTick()
 void OnTimer()
 {
    PollButtons();
-   if(TimeCurrent()-마지막라이센스체크 >= 3600) {
+   int _reCheckSec = licenseOK ? 3600 : 60;
+   if(TimeCurrent()-마지막라이센스체크 >= _reCheckSec) {
       마지막라이센스체크 = TimeCurrent();
       if(!CheckLicense()) {
          if(licenseOK) { licenseOK=false; CloseSide(OP_BUY); CloseSide(OP_SELL); buyStopped=true; sellStopped=true; }

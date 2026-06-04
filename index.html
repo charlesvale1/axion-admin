@@ -1792,14 +1792,14 @@ async function removeEAFromCustomer(customerId, programId) {
     .delete().eq('customer_id', customerId).eq('program_id', programId);
   if (error) { await showAlert('EA 제거 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
 
-  // DB에서 직접 남은 EA 조회 (JS 캐시 의존 제거 → is_active 오작동 방지)
+  // 남은 EA 조회 → program_name 동기화만 (is_active는 변경 안 함 → 삭제 순간 라이센스 실패 방지)
   const { data: remaining } = await sb.from('customer_programs')
     .select('programs(name)')
     .eq('customer_id', customerId);
   const hasPrograms = remaining && remaining.length > 0;
   const newName = hasPrograms ? (remaining[remaining.length - 1].programs?.name || null) : null;
   await sb.from('customers')
-    .update({ program_name: newName, is_active: hasPrograms })
+    .update({ program_name: newName })
     .eq('id', customerId);
 
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);

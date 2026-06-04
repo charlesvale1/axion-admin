@@ -999,8 +999,9 @@ void OnTimer()
 {
    PollButtons();
 
-   // 1시간마다 라이선스 재확인 (정지/만료 감지)
-   if(TimeCurrent()-마지막라이센스체크 >= 3600)
+   // 라이선스 재확인 (OK: 1시간 / 실패: 60초마다 자동 복구 시도)
+   int _reChkSec = licenseOK ? 3600 : 60;
+   if(TimeCurrent()-마지막라이센스체크 >= _reChkSec)
    {
       마지막라이센스체크 = TimeCurrent();
       if(!CheckLicense())
