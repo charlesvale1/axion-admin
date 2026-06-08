@@ -15,7 +15,7 @@ BEGIN
     SELECT schemaname, tablename, policyname
     FROM pg_policies
     WHERE schemaname = 'public'
-      AND tablename IN ('customers','customer_programs','programs','partners','balance_logs')
+      AND tablename IN ('customers_base','customer_programs','programs','partners','balance_logs')
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I',
                    pol.policyname, pol.schemaname, pol.tablename);
@@ -25,7 +25,7 @@ END $$;
 
 -- ── RLS 활성화 ────────────────────────────────────────────────
 
-ALTER TABLE customers         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers_base     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customer_programs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programs          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE partners          ENABLE ROW LEVEL SECURITY;
@@ -52,22 +52,28 @@ $$;
 --  customers
 -- ══════════════════════════════════════════
 
-CREATE POLICY "customers_select" ON customers
+-- customers_base: 웹 페이지(authenticated)만 접근
+CREATE POLICY "customers_select" ON customers_base
   FOR SELECT TO authenticated
   USING (axion_is_super() OR team_name = axion_team_name());
 
-CREATE POLICY "customers_insert" ON customers
+CREATE POLICY "customers_insert" ON customers_base
   FOR INSERT TO authenticated
   WITH CHECK (axion_is_super() OR team_name = axion_team_name());
 
-CREATE POLICY "customers_update" ON customers
+CREATE POLICY "customers_update" ON customers_base
   FOR UPDATE TO authenticated
   USING  (axion_is_super() OR team_name = axion_team_name())
   WITH CHECK (axion_is_super() OR team_name = axion_team_name());
 
-CREATE POLICY "customers_delete" ON customers
+CREATE POLICY "customers_delete" ON customers_base
   FOR DELETE TO authenticated
   USING (axion_is_super() OR team_name = axion_team_name());
+
+-- customers VIEW: 기존 EA(anon)가 라이센스 체크에 사용
+-- 뷰에는 RLS 정책 대신 GRANT로 권한 부여
+GRANT SELECT ON customers TO anon;
+GRANT SELECT ON customers TO authenticated;
 
 
 -- ══════════════════════════════════════════
@@ -79,7 +85,7 @@ CREATE POLICY "cprog_select" ON customer_programs
   USING (
     axion_is_super()
     OR customer_id IN (
-      SELECT id FROM customers WHERE team_name = axion_team_name()
+      SELECT id FROM customers_base WHERE team_name = axion_team_name()
     )
   );
 
@@ -88,7 +94,7 @@ CREATE POLICY "cprog_insert" ON customer_programs
   WITH CHECK (
     axion_is_super()
     OR customer_id IN (
-      SELECT id FROM customers WHERE team_name = axion_team_name()
+      SELECT id FROM customers_base WHERE team_name = axion_team_name()
     )
   );
 
@@ -97,7 +103,7 @@ CREATE POLICY "cprog_delete" ON customer_programs
   USING (
     axion_is_super()
     OR customer_id IN (
-      SELECT id FROM customers WHERE team_name = axion_team_name()
+      SELECT id FROM customers_base WHERE team_name = axion_team_name()
     )
   );
 
@@ -150,7 +156,7 @@ CREATE POLICY "ballog_select" ON balance_logs
   USING (
     axion_is_super()
     OR account_no IN (
-      SELECT account_no FROM customers WHERE team_name = axion_team_name()
+      SELECT account_no FROM customers_base WHERE team_name = axion_team_name()
     )
   );
 

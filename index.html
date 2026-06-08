@@ -1306,7 +1306,7 @@ async function loadPrograms() {
 }
 
 async function loadCustomers() {
-  let q = sb.from('customers').select('*, programs(name)')
+  let q = sb.from('customers_base').select('*, programs(name)')
     .order('created_at', { ascending: false });
   if (!isSuperAdmin) q = q.eq('team_name', currentTeam);
   const { data } = await q;
@@ -1432,7 +1432,8 @@ function filterCustomers() {
   let list = allCustomers.filter(c => {
     const mQ = !q || c.name.toLowerCase().includes(q) || c.account_no.includes(q);
     const mS = st === 'all' || c.status === st;
-    const mP = pg === 'all' || c.program_id === pg;
+    const assigned = customerPrograms[c.id] || [];
+    const mP = pg === 'all' || c.program_id === pg || assigned.some(p => p.id === pg);
     const mT = tm === 'all' || c.team_name === tm;
     return mQ && mS && mP && mT;
   });
@@ -1562,7 +1563,7 @@ async function addCustomer() {
 
   try {
     // 중복 계좌 체크
-    const { data: existing, error: checkError } = await sb.from('customers')
+    const { data: existing, error: checkError } = await sb.from('customers_base')
       .select('id,name')
       .eq('account_no', payload.account_no)
       .maybeSingle();
@@ -1577,7 +1578,7 @@ async function addCustomer() {
       return;
     }
 
-    const { data: inserted, error } = await sb.from('customers')
+    const { data: inserted, error } = await sb.from('customers_base')
       .insert(payload)
       .select('id')
       .single();
@@ -1598,6 +1599,13 @@ async function addCustomer() {
       if (cpError && !(cpError.message || '').toLowerCase().includes('duplicate')) {
         await showAlert('고객은 등록되었지만 EA 할당 중 오류가 발생했습니다.\n고객 관리 → [관리]에서 EA를 다시 추가해주세요.\n\n' + cpError.message, '⚠️');
       }
+
+      // addEAToCustomer와 동일하게 program_name + is_active를 명시적으로 동기화
+      const prog = allPrograms.find(p => p.id === payload.program_id);
+      const confirmedName = prog ? prog.name : progName;
+      await sb.from('customers_base')
+        .update({ program_name: confirmedName, is_active: true })
+        .eq('id', inserted.id);
     }
 
     closeModals();
@@ -1647,7 +1655,7 @@ async function extendLicense() {
     if (!c) return;
     const base = new Date(c.expires_at) > new Date() ? new Date(c.expires_at) : new Date();
     base.setMonth(base.getMonth() + months);
-    const { error } = await sb.from('customers')
+    const { error } = await sb.from('customers_base')
       .update({ expires_at: base.toISOString(), is_active: true }).eq('id', extendTargetId);
     if (error) { await showAlert('연장 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
     closeModals();
@@ -1663,7 +1671,7 @@ async function extendLicense() {
 async function deleteCustomer(id) {
   if (!isSuperAdmin) return;
   if (!await showConfirm('고객을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.', '삭제', true)) return;
-  await sb.from('customers').delete().eq('id', id);
+  await sb.from('customers_base').delete().eq('id', id);
   showToast('고객이 삭제되었습니다.');
   await loadCustomers();
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
@@ -1673,7 +1681,7 @@ async function toggleActive(id, cur) {
   const next = !cur;
   const msg  = next ? '이 고객을 활성화하시겠습니까?' : 'EA를 정지하시겠습니까?\n다음 틱에 즉시 거래가 중단됩니다.';
   if (!await showConfirm(msg, next ? '활성화' : '정지', !next)) return;
-  const { error } = await sb.from('customers').update({ is_active: next }).eq('id', id);
+  const { error } = await sb.from('customers_base').update({ is_active: next }).eq('id', id);
   if (error) { await showAlert('오류가 발생했습니다.\n' + error.message, '❌'); return; }
   showToast(next ? '✅ 활성화되었습니다.' : 'EA가 정지되었습니다.');
   await loadCustomers();
@@ -1710,10 +1718,19 @@ async function saveEdit() {
   if (!payload.name || !payload.account_no) {
     await showAlert('이름과 계좌번호를 입력해주세요.', '⚠️'); return;
   }
-  const { error } = await sb.from('customers').update(payload).eq('id', id);
+  const { error } = await sb.from('customers_base').update(payload).eq('id', id);
   if (error) { await showAlert('수정 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
+
+  if (payload.program_id) {
+    const { error: cpErr } = await sb.from('customer_programs')
+      .insert({ customer_id: id, program_id: payload.program_id });
+    if (cpErr && !(cpErr.message || '').toLowerCase().includes('duplicate')) {
+      await showAlert('고객 정보는 수정됐지만 EA 권한 추가 중 오류가 발생했습니다.\n' + cpErr.message, '⚠️');
+    }
+  }
+
   closeModals();
-  await loadCustomers();
+  await Promise.all([loadCustomers(), loadCustomerPrograms()]);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
   await showAlert('고객 정보가 수정되었습니다.', '✅');
 }
@@ -1729,16 +1746,27 @@ function openManageEA(customerId, customerName) {
 function refreshManageEA(customerId) {
   const assigned = customerPrograms[customerId] || [];
   const assignedIds = assigned.map(p => p.id);
+  const activeName = (allCustomers.find(x => x.id === customerId) || {}).program_name || '';
 
-  // 현재 할당 목록
+  // 현재 할당 목록 — 활성 EA 표시 + 비활성 EA는 "활성 설정" 버튼 제공
   document.getElementById('mea-current-list').innerHTML = assigned.length
-    ? assigned.map(p => `
-        <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(109,91,250,.15);
-          border:1px solid var(--purple);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--purple-light)">
-          ${p.name}
+    ? assigned.map(p => {
+        const isActive = p.name === activeName;
+        return `
+        <div style="display:flex;align-items:center;gap:6px;background:rgba(109,91,250,.15);
+          border:1px solid var(--purple);padding:5px 10px;border-radius:4px;font-size:11px;
+          color:var(--purple-light);margin-bottom:4px">
+          <span style="flex:1">${p.name}</span>
+          ${isActive
+            ? '<span style="color:#4ade80;font-size:9px;font-weight:700;white-space:nowrap">▶ 활성</span>'
+            : `<button onclick="setActiveEA('${customerId}','${p.name.replace(/'/g,"\\'")}')"
+                 style="cursor:pointer;background:rgba(74,222,128,.12);border:1px solid #4ade80;
+                        color:#4ade80;font-size:9px;padding:1px 6px;border-radius:3px;white-space:nowrap">
+                 활성 설정</button>`}
           <span onclick="removeEAFromCustomer('${customerId}','${p.id}')"
-            style="cursor:pointer;color:var(--red);font-size:13px;line-height:1;margin-left:2px">×</span>
-        </span>`).join('')
+            style="cursor:pointer;color:var(--red);font-size:14px;line-height:1;margin-left:2px">×</span>
+        </div>`;
+      }).join('')
     : '<span style="color:var(--text3);font-size:11px">할당된 EA 없음</span>';
 
   // 추가 가능한 EA (이미 할당된 것 제외)
@@ -1772,13 +1800,16 @@ async function addEAToCustomer() {
     return;
   }
 
-  // 2) customers.program_name 동기화 (EA 코드 라이센스 체크가 이 컬럼을 사용)
-  const { error: upErr } = await sb.from('customers')
-    .update({ program_name: program.name, is_active: true })
-    .eq('id', customerId);
-
-  if (upErr) {
-    await showAlert('EA 할당은 완료됐지만 program_name 동기화 오류:\n' + upErr.message, '⚠️');
+  // 2) program_name 동기화 — 이미 값이 있으면 덮어쓰지 않는다.
+  //    기존 EA가 실행 중인 동안 program_name이 바뀌면 라이센스 체크 실패 원인이 됨.
+  const currentCustomer = allCustomers.find(x => x.id === customerId);
+  if (!currentCustomer?.program_name) {
+    const { error: upErr } = await sb.from('customers_base')
+      .update({ program_name: program.name })
+      .eq('id', customerId);
+    if (upErr) {
+      await showAlert('EA 할당은 완료됐지만 program_name 동기화 오류:\n' + upErr.message, '⚠️');
+    }
   }
 
   await Promise.all([loadCustomers(), loadCustomerPrograms()]);
@@ -1798,7 +1829,7 @@ async function removeEAFromCustomer(customerId, programId) {
     .eq('customer_id', customerId);
   const hasPrograms = remaining && remaining.length > 0;
   const newName = hasPrograms ? (remaining[remaining.length - 1].programs?.name || null) : null;
-  await sb.from('customers')
+  await sb.from('customers_base')
     .update({ program_name: newName })
     .eq('id', customerId);
 
@@ -1806,6 +1837,18 @@ async function removeEAFromCustomer(customerId, programId) {
   refreshManageEA(customerId);
   renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
   showToast('EA가 해제되었습니다.');
+}
+
+// 여러 EA 중 현재 사용할 EA를 지정 — program_name만 변경, 권한 목록은 그대로
+async function setActiveEA(customerId, programName) {
+  const { error } = await sb.from('customers_base')
+    .update({ program_name: programName })
+    .eq('id', customerId);
+  if (error) { await showAlert('활성 EA 변경 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
+  await loadCustomers();
+  refreshManageEA(customerId);
+  renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  showToast(programName + ' EA가 활성으로 설정되었습니다. ✅');
 }
 
 /* ── EA PROGRAM CRUD ── */
@@ -1828,7 +1871,7 @@ async function deleteProgram(id, name) {
   if (!await showConfirm(`"${name}" 프로그램을 삭제하시겠습니까?\n해당 EA가 할당된 모든 고객 라이선스도 함께 해제됩니다.`, '삭제', true)) return;
   try { await sb.from('customer_programs').delete().eq('program_id', id); } catch(e) {}
   try { await sb.from('partner_programs').delete().eq('program_id', id); } catch(e) {}
-  try { await sb.from('customers').update({ program_id: null, program_name: null }).eq('program_id', id); } catch(e) {}
+  try { await sb.from('customers_base').update({ program_id: null, program_name: null }).eq('program_id', id); } catch(e) {}
   const { error } = await sb.from('programs').delete().eq('id', id);
   if (error) { await showAlert('삭제 중 오류가 발생했습니다.\n' + error.message, '❌'); return; }
   showToast('EA 프로그램이 삭제되었습니다.');
