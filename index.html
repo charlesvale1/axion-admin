@@ -783,6 +783,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
               <tbody id="customers-table"><tr><td colspan="9" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
+          <div id="customers-pagination"></div>
         </div>
 
         <!-- EXPIRY -->
@@ -1128,6 +1129,9 @@ let partnerProgMap    = {};         // partner_id -> [program_id, ...]
 let customerPrograms  = {};         // customer_id -> [{id, name}, ...]
 let myAllowedProgIds  = null;       // null = 슈퍼어드민 (전체 허용)
 let extendTargetId    = null;
+let customerPage      = 1;
+let _pagedList        = [];
+const PAGE_SIZE       = 10;
 let currentUser       = null;
 let isSuperAdmin      = false;
 let currentTeam       = null;
@@ -1425,10 +1429,15 @@ function renderDashboard() {
 
 function renderCustomers(list) {
   list = list || allCustomers;
+  _pagedList = list;
   const teamCol = isSuperAdmin ? c => `<td><span class="team-tag">${c.team_name || '—'}</span></td>` : () => '';
   const colSpan = isSuperAdmin ? 11 : 10;
 
-  document.getElementById('customers-table').innerHTML = list.length ? list.map(c => {
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  if (customerPage > totalPages) customerPage = totalPages;
+  const pageSlice = list.slice((customerPage - 1) * PAGE_SIZE, customerPage * PAGE_SIZE);
+
+  document.getElementById('customers-table').innerHTML = pageSlice.length ? pageSlice.map(c => {
     const b = balMap[c.account_no];
     const p = prevBalMap[c.account_no];
     const dailyChg = (b && p) ? Number(b.balance) - Number(p.prev_balance) : null;
@@ -1455,9 +1464,51 @@ function renderCustomers(list) {
       </div></td>
     </tr>`;
   }).join('') : `<tr><td colspan="${colSpan}" class="empty">고객이 없습니다</td></tr>`;
+
+  // 페이지네이션 UI
+  const pg = document.getElementById('customers-pagination');
+  if (!pg) return;
+  if (totalPages <= 1) { pg.innerHTML = ''; return; }
+
+  const btnStyle = (active) =>
+    `style="min-width:32px;height:30px;padding:0 8px;border-radius:6px;border:1px solid ${active ? 'var(--purple)' : 'rgba(255,255,255,.1)'};
+     background:${active ? 'var(--purple)' : 'transparent'};color:${active ? '#fff' : 'var(--text2)'};
+     cursor:${active ? 'default' : 'pointer'};font-size:12px;font-weight:${active ? '700' : '400'}"`;
+
+  const disabledStyle =
+    `style="min-width:28px;height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(255,255,255,.05);
+     background:transparent;color:var(--text3);cursor:default;font-size:13px"`;
+
+  let pages = [];
+
+  pages.push(customerPage > 1
+    ? `<button onclick="goCustomerPage(${customerPage-1})" style="min-width:28px;height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:var(--text2);cursor:pointer;font-size:13px">‹</button>`
+    : `<button disabled ${disabledStyle}>‹</button>`);
+
+  let s = Math.max(1, customerPage - 2), e = Math.min(totalPages, customerPage + 2);
+  if (s > 1) { pages.push(`<button onclick="goCustomerPage(1)" ${btnStyle(false)}>1</button>`); if (s > 2) pages.push(`<span style="color:var(--text3);font-size:12px;padding:0 2px">…</span>`); }
+  for (let i = s; i <= e; i++) pages.push(`<button onclick="goCustomerPage(${i})" ${btnStyle(i === customerPage)}>${i}</button>`);
+  if (e < totalPages) { if (e < totalPages-1) pages.push(`<span style="color:var(--text3);font-size:12px;padding:0 2px">…</span>`); pages.push(`<button onclick="goCustomerPage(${totalPages})" ${btnStyle(false)}>${totalPages}</button>`); }
+
+  pages.push(customerPage < totalPages
+    ? `<button onclick="goCustomerPage(${customerPage+1})" style="min-width:28px;height:30px;padding:0 6px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:var(--text2);cursor:pointer;font-size:13px">›</button>`
+    : `<button disabled ${disabledStyle}>›</button>`);
+
+  pg.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;gap:4px;padding:14px 0 4px">
+    <span style="font-size:11px;color:var(--text3);margin-right:8px">총 ${list.length}명</span>
+    ${pages.join('')}
+  </div>`;
+}
+
+function goCustomerPage(page) {
+  const total = Math.max(1, Math.ceil(_pagedList.length / PAGE_SIZE));
+  if (page < 1 || page > total) return;
+  customerPage = page;
+  renderCustomers(_pagedList);
 }
 
 function filterCustomers() {
+  customerPage = 1;
   const q  = document.getElementById('search-input').value.toLowerCase();
   const st = document.getElementById('filter-status').value;
   const pg = document.getElementById('filter-prog').value;
