@@ -1446,7 +1446,8 @@ function renderCustomers(list) {
       ${dailyChg !== null ? (dailyChg >= 0 ? '+' : '') + '$' + dailyChg.toFixed(2) : '—'}</td>`;
     const progs = customerPrograms[c.id] || [];
     const progTd = progs.length
-      ? progs.map(p => `<span class="prog-tag">${p.name}</span>`).join(' ')
+      ? `<span class="prog-tag">${progs[0].name}</span>` +
+        (progs.length > 1 ? `<span style="font-size:10px;color:var(--purple-light);font-weight:600;margin-left:3px">+${progs.length - 1}</span>` : '')
       : `<span style="color:var(--text3);font-size:11px">없음</span>`;
     return `<tr>
       <td>${c.name}</td>
