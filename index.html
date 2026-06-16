@@ -1306,9 +1306,11 @@ async function loadBalancesGlobal() {
     });
   }
 
-  // 캐시 저장
+  // 캐시 저장 — 빈 데이터는 캐시하지 않음 (빈 캐시로 인한 표시 오류 방지)
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ b: balMap, p: prevBalMap, ts: Date.now() }));
+    if (Object.keys(balMap).length > 0) {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ b: balMap, p: prevBalMap, ts: Date.now() }));
+    }
   } catch(e) {}
 }
 
