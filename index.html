@@ -1251,7 +1251,7 @@ async function loadCustomerPrograms() {
 }
 
 async function loadBalancesGlobal() {
-  const CACHE_KEY = 'axion_bal_v2';
+  const CACHE_KEY = 'axion_bal_v3';
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
@@ -1267,8 +1267,8 @@ async function loadBalancesGlobal() {
     }
   } catch(e) {}
 
-  const applyLatestRows = (rows) => {
-    balMap = {};
+  const applyLatestRows = (rows, reset = false) => {
+    if (reset) balMap = {};
     (rows || []).forEach(b => {
       const key = acctKey(b.account_no);
       if (key && !balMap[key]) balMap[key] = b;
@@ -1282,33 +1282,50 @@ async function loadBalancesGlobal() {
 
   // ── 최신 잔고: latest_balances view (계좌별 최신 1행) ──
   // .in() 필터로 현재 계좌만 조회 → 뷰 권한 문제 있어도 필요한 계좌만 가져옴
-  let gotBalance = false;
   if (accountNos.length > 0) {
     const { data: latestData, error: latestErr } = await sb
       .from('latest_balances')
       .select('account_no, balance, equity, profit, logged_at')
       .in('account_no', accountNos);
     if (!latestErr && latestData && latestData.length > 0) {
-      applyLatestRows(latestData);
-      gotBalance = true;
+      applyLatestRows(latestData, true);
     } else if (latestErr) {
       console.warn('[잔고] latest_balances 조회 실패:', latestErr.message, '→ balance_logs 직접 조회');
     }
   }
 
   // ── fallback: balance_logs 직접 조회 ──
-  // latest_balances 미작동 시 또는 계좌 목록 없을 때
-  if (!gotBalance) {
+  // latest_balances가 일부 계좌만 반환할 때도 부족분을 채운다.
+  const missingAfterLatest = accountNos.filter(acc => !balMap[acc]);
+  if (accountNos.length === 0 || missingAfterLatest.length > 0) {
     let q = sb.from('balance_logs')
       .select('account_no, balance, equity, profit, logged_at')
       .order('logged_at', { ascending: false })
       .limit(5000);
-    if (accountNos.length > 0 && accountNos.length <= 150) {
-      q = q.in('account_no', accountNos);
+    if (missingAfterLatest.length > 0 && missingAfterLatest.length <= 150) {
+      q = q.in('account_no', missingAfterLatest);
     }
     const { data: fb, error: fbErr } = await q;
     if (fbErr) console.error('[잔고] balance_logs 조회 실패:', fbErr.message);
-    else applyLatestRows(fb);
+    else applyLatestRows(fb, accountNos.length === 0);
+  }
+
+  // 계좌번호에 숨은 공백이 있는 balance_logs까지 보강 검색
+  const missingAfterExact = accountNos.filter(acc => !balMap[acc]);
+  if (missingAfterExact.length > 0 && missingAfterExact.length <= 80) {
+    const looseResults = await Promise.all(missingAfterExact.map(async acc => {
+      const { data, error } = await sb.from('balance_logs')
+        .select('account_no, balance, equity, profit, logged_at')
+        .ilike('account_no', `%${acc}%`)
+        .order('logged_at', { ascending: false })
+        .limit(1);
+      if (error) {
+        console.warn('[잔고] 계좌별 보강 조회 실패:', acc, error.message);
+        return null;
+      }
+      return data?.[0] ? { ...data[0], account_no: acc } : null;
+    }));
+    applyLatestRows(looseResults.filter(Boolean));
   }
 
   // ── 전일 잔고: balance_logs에서 기간 + limit 제한 조회 ──
