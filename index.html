@@ -1267,28 +1267,36 @@ async function loadBalancesGlobal() {
     }
   } catch(e) {}
 
+  const applyLatestRows = (rows) => {
+    balMap = {};
+    (rows || []).forEach(b => {
+      const key = acctKey(b.account_no);
+      if (key && !balMap[key]) balMap[key] = b;
+    });
+  };
+
   // ── 최신 잔고: latest_balances view (계좌별 최신 1행만 존재) ──
   const { data: latestData, error: latestErr } = await sb
     .from('latest_balances')
     .select('account_no, balance, equity, profit, logged_at');
 
-  if (latestErr) {
-    console.error('[잔고] latest_balances 조회 실패:', latestErr.message,
-      '→ RLS 또는 view 미생성 확인. balance_logs fallback 사용.');
-    // fallback: balance_logs 최근 2시간 + 기간 bounded
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  if (latestErr || !latestData || latestData.length === 0) {
+    if (latestErr) {
+      console.error('[잔고] latest_balances 조회 실패:', latestErr.message,
+        '→ RLS 또는 view 미생성 확인. balance_logs fallback 사용.');
+    } else {
+      console.warn('[잔고] latest_balances 데이터 없음 → balance_logs fallback 사용');
+    }
+
+    // fallback: balance_logs에서 계좌별 최신값 직접 구성
     const { data: fb, error: fbErr } = await sb.from('balance_logs')
       .select('account_no, balance, equity, profit, logged_at')
-      .gte('logged_at', twoHoursAgo.toISOString())
       .order('logged_at', { ascending: false })
-      .limit(500);
+      .limit(2000);
     if (fbErr) console.error('[잔고] fallback도 실패:', fbErr.message);
-    else if (fb) { balMap = {}; fb.forEach(b => { if (!balMap[b.account_no]) balMap[b.account_no] = b; }); }
-  } else if (!latestData || latestData.length === 0) {
-    console.warn('[잔고] latest_balances 데이터 없음 — EA 실행 여부 확인');
+    else applyLatestRows(fb);
   } else {
-    balMap = {};
-    latestData.forEach(b => { balMap[b.account_no] = b; });
+    applyLatestRows(latestData);
   }
 
   // ── 전일 잔고: balance_logs에서 기간 + limit 제한 조회 ──
@@ -1302,7 +1310,8 @@ async function loadBalancesGlobal() {
   prevBalMap = {};
   if (prevData) {
     prevData.forEach(b => {
-      if (!prevBalMap[b.account_no]) prevBalMap[b.account_no] = { prev_balance: b.balance };
+      const key = acctKey(b.account_no);
+      if (key && !prevBalMap[key]) prevBalMap[key] = { prev_balance: b.balance };
     });
   }
 
@@ -1385,6 +1394,7 @@ function statusBadge(s) {
 }
 function fmtDate(d)   { return d ? new Date(d).toLocaleDateString('ko-KR') : '-'; }
 function fmtMoney(v)  { return v != null ? '$' + Number(v).toLocaleString() : '-'; }
+function acctKey(v)   { return String(v ?? '').trim(); }
 function dDay(n) {
   if (n < 0)   return '<span class="c-red" style="font-size:11px">만료됨</span>';
   if (n <= 7)  return `<span class="c-amber" style="font-size:11px;font-weight:600">D-${n}</span>`;
@@ -1417,7 +1427,7 @@ function renderDashboard() {
 
   const recent = allCustomers.slice(0, 8);
   document.getElementById('dash-table').innerHTML = recent.length ? recent.map(c => {
-    const b = balMap[c.account_no];
+    const b = balMap[acctKey(c.account_no)];
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
@@ -1440,8 +1450,9 @@ function renderCustomers(list) {
   const pageSlice = list.slice((customerPage - 1) * PAGE_SIZE, customerPage * PAGE_SIZE);
 
   document.getElementById('customers-table').innerHTML = pageSlice.length ? pageSlice.map(c => {
-    const b = balMap[c.account_no];
-    const p = prevBalMap[c.account_no];
+    const key = acctKey(c.account_no);
+    const b = balMap[key];
+    const p = prevBalMap[key];
     const dailyChg = (b && p) ? Number(b.balance) - Number(p.prev_balance) : null;
     const balTd    = `<td style="font-weight:600;color:${b ? 'var(--text)' : 'var(--text3)'}">${b ? fmtMoney(b.balance) : '데이터 대기 중'}</td>`;
     const profitTd = `<td style="font-size:12px;color:${dailyChg !== null ? (dailyChg >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text3)'}">
@@ -1530,7 +1541,7 @@ function filterCustomers() {
 function renderExpiry() {
   const list = allCustomers.filter(c => c.status === 'warn' || c.status === 'expired');
   document.getElementById('expiry-table').innerHTML = list.length ? list.map(c => {
-    const b = balMap[c.account_no];
+    const b = balMap[acctKey(c.account_no)];
     return `<tr>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
@@ -1546,8 +1557,9 @@ function renderExpiry() {
 async function renderStats() {
   let totalBal = 0, totalDailyChg = 0, chgCount = 0, lastUpdate = null;
   const rows = allCustomers.map(c => {
-    const b = balMap[c.account_no];
-    const p = prevBalMap[c.account_no];
+    const key = acctKey(c.account_no);
+    const b = balMap[key];
+    const p = prevBalMap[key];
     const dailyChg = (b && p) ? Number(b.balance) - Number(p.prev_balance) : null;
     if (b) {
       totalBal += Number(b.balance);
