@@ -1251,7 +1251,7 @@ async function loadCustomerPrograms() {
 }
 
 async function loadBalancesGlobal() {
-  const CACHE_KEY = 'axion_bal_v1';
+  const CACHE_KEY = 'axion_bal_v2';
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart - 24 * 60 * 60 * 1000);
@@ -1275,28 +1275,40 @@ async function loadBalancesGlobal() {
     });
   };
 
-  // ── 최신 잔고: latest_balances view (계좌별 최신 1행만 존재) ──
-  const { data: latestData, error: latestErr } = await sb
-    .from('latest_balances')
-    .select('account_no, balance, equity, profit, logged_at');
+  // 이미 로드된 고객 계좌번호 목록 (RLS로 이미 내 팀 계좌만 필터됨)
+  const accountNos = [...new Set(
+    allCustomers.map(c => String(c.account_no || '').trim()).filter(Boolean)
+  )];
 
-  if (latestErr || !latestData || latestData.length === 0) {
-    if (latestErr) {
-      console.error('[잔고] latest_balances 조회 실패:', latestErr.message,
-        '→ RLS 또는 view 미생성 확인. balance_logs fallback 사용.');
-    } else {
-      console.warn('[잔고] latest_balances 데이터 없음 → balance_logs fallback 사용');
+  // ── 최신 잔고: latest_balances view (계좌별 최신 1행) ──
+  // .in() 필터로 현재 계좌만 조회 → 뷰 권한 문제 있어도 필요한 계좌만 가져옴
+  let gotBalance = false;
+  if (accountNos.length > 0) {
+    const { data: latestData, error: latestErr } = await sb
+      .from('latest_balances')
+      .select('account_no, balance, equity, profit, logged_at')
+      .in('account_no', accountNos);
+    if (!latestErr && latestData && latestData.length > 0) {
+      applyLatestRows(latestData);
+      gotBalance = true;
+    } else if (latestErr) {
+      console.warn('[잔고] latest_balances 조회 실패:', latestErr.message, '→ balance_logs 직접 조회');
     }
+  }
 
-    // fallback: balance_logs에서 계좌별 최신값 직접 구성
-    const { data: fb, error: fbErr } = await sb.from('balance_logs')
+  // ── fallback: balance_logs 직접 조회 ──
+  // latest_balances 미작동 시 또는 계좌 목록 없을 때
+  if (!gotBalance) {
+    let q = sb.from('balance_logs')
       .select('account_no, balance, equity, profit, logged_at')
       .order('logged_at', { ascending: false })
-      .limit(2000);
-    if (fbErr) console.error('[잔고] fallback도 실패:', fbErr.message);
+      .limit(5000);
+    if (accountNos.length > 0 && accountNos.length <= 150) {
+      q = q.in('account_no', accountNos);
+    }
+    const { data: fb, error: fbErr } = await q;
+    if (fbErr) console.error('[잔고] balance_logs 조회 실패:', fbErr.message);
     else applyLatestRows(fb);
-  } else {
-    applyLatestRows(latestData);
   }
 
   // ── 전일 잔고: balance_logs에서 기간 + limit 제한 조회 ──
