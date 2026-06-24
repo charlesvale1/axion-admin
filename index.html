@@ -1209,11 +1209,11 @@ function startApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
-  // 잔고 5분마다 자동 갱신
+  // 잔고 1분마다 자동 갱신
   setInterval(async () => {
     await loadBalancesGlobal();
     renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  }, 300000);
+  }, 60000);
 }
 
 /* ── DATA LOADING ── */
@@ -1259,7 +1259,7 @@ async function loadBalancesGlobal() {
   // localStorage 캐시 즉시 복원 (새로고침 깜빡임 방지)
   try {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-    if (cached && Date.now() - cached.ts < 10 * 60 * 1000) {
+    if (cached && Date.now() - cached.ts < 60 * 1000) {
       if (!Object.keys(balMap).length) {
         balMap    = cached.b  || {};
         prevBalMap = cached.p || {};
