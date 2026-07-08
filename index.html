@@ -1614,7 +1614,8 @@ function filterCustomers() {
 }
 
 function renderExpiry() {
-  const list = allCustomers.filter(c => c.status === 'warn' || c.status === 'expired');
+  // 정지처리(is_active=false)된 고객 제외 — 만료 임박/만료됨은 활성 고객만 표시
+  const list = allCustomers.filter(c => c.status === 'warn' || (c.status === 'expired' && c.is_active));
   document.getElementById('expiry-table').innerHTML = list.length ? list.map(c => {
     const b = balMap[acctKey(c.account_no)];
     return `<tr>
