@@ -1908,7 +1908,7 @@ async function deleteCustomer(id) {
   await sb.from('customers_base').delete().eq('id', id);
   showToast('고객이 삭제되었습니다.');
   await loadCustomers();
-  renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
+  filterCustomers(); renderDashboard(); renderExpiry(); renderStats();
 }
 
 async function toggleActive(id, cur) {
@@ -1919,7 +1919,7 @@ async function toggleActive(id, cur) {
   if (error) { await showAlert('오류가 발생했습니다.\n' + error.message, '❌'); return; }
   showToast(next ? '✅ 활성화되었습니다.' : 'EA가 정지되었습니다.');
   await loadCustomers();
-  renderCustomers(); renderDashboard(); renderExpiry();
+  filterCustomers(); renderDashboard(); renderExpiry();
 }
 
 function openEdit(id) {
