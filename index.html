@@ -771,6 +771,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
           <div class="table-wrap">
             <table>
               <thead><tr>
+                <th style="width:32px;text-align:center"><input type="checkbox" id="chk-all" onchange="toggleSelectAll(this.checked)" style="cursor:pointer"></th>
                 <th style="width:70px">이름</th>
                 <th style="width:105px">계좌번호</th>
                 <th style="width:88px">프로그램</th>
@@ -781,7 +782,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
                 <th style="width:70px">상태</th>
                 <th style="width:90px">액션</th>
               </tr></thead>
-              <tbody id="customers-table"><tr><td colspan="9" class="loading">불러오는 중</td></tr></tbody>
+              <tbody id="customers-table"><tr><td colspan="10" class="loading">불러오는 중</td></tr></tbody>
             </table>
           </div>
           <div id="customers-pagination"></div>
@@ -1076,6 +1077,32 @@ tr:hover td { background: rgba(255,255,255,.012); }
   </div>
 </div>
 
+<!-- 선택 고객 하단 액션 바 -->
+<div id="bulk-ea-bar" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:var(--bg2);border:1px solid var(--purple);border-radius:12px;padding:10px 20px;
+  display:none;align-items:center;gap:14px;box-shadow:0 4px 24px rgba(0,0,0,.5);z-index:900;white-space:nowrap">
+  <span id="bulk-ea-count" style="font-size:13px;color:var(--purple-light);font-weight:600"></span>
+  <button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="openBulkEAModal()">EA 일괄 부여</button>
+  <button class="btn-cancel" style="padding:6px 12px;font-size:12px" onclick="clearSelection()">선택 해제</button>
+</div>
+
+<!-- EA 일괄 부여 모달 -->
+<div class="modal-bg hidden" id="bulk-ea-modal" onclick="closeModals()">
+  <div class="modal" style="width:380px" onclick="event.stopPropagation()">
+    <div class="modal-title">EA 일괄 부여</div>
+    <div id="bulk-ea-info" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px;margin-bottom:14px;font-size:12px;color:var(--text2)"></div>
+    <div class="form-group">
+      <label class="form-label">부여할 EA 프로그램</label>
+      <select class="form-input" id="bulk-ea-program" style="margin:0"></select>
+    </div>
+    <div id="bulk-ea-result" style="display:none;margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);font-size:12px"></div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" id="bulk-ea-submit-btn" onclick="runBulkEAAssign()">부여</button>
+    </div>
+  </div>
+</div>
+
 <!-- 일괄 등록 모달 (총관리자 전용) -->
 <div class="modal-bg hidden" id="bulk-import-modal" onclick="closeModals()">
   <div class="modal" style="width:500px" onclick="event.stopPropagation()">
@@ -1167,6 +1194,7 @@ let customerPrograms  = {};         // customer_id -> [{id, name}, ...]
 let myAllowedProgIds  = null;       // null = 슈퍼어드민 (전체 허용)
 let extendTargetId    = null;
 let customerPage      = 1;
+let selectedCustomerIds = new Set();
 let _pagedList        = [];
 const PAGE_SIZE       = 50;
 let currentUser       = null;
@@ -1518,7 +1546,7 @@ function renderCustomers(list) {
   list = list || allCustomers;
   _pagedList = list;
   const teamCol = isSuperAdmin ? c => `<td><span class="team-tag">${c.team_name || '—'}</span></td>` : () => '';
-  const colSpan = isSuperAdmin ? 11 : 10;
+  const colSpan = isSuperAdmin ? 12 : 11;
 
   const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   if (customerPage > totalPages) customerPage = totalPages;
@@ -1537,7 +1565,9 @@ function renderCustomers(list) {
       ? `<span class="prog-tag">${progs[0].name}</span>` +
         (progs.length > 1 ? `<span style="font-size:10px;color:var(--purple-light);font-weight:600;margin-left:3px">+${progs.length - 1}</span>` : '')
       : `<span style="color:var(--text3);font-size:11px">없음</span>`;
-    return `<tr>
+    const isChecked = selectedCustomerIds.has(c.id);
+    return `<tr style="${isChecked ? 'background:rgba(109,91,250,.08)' : ''}">
+      <td style="text-align:center"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelectCustomer('${c.id}',this.checked)" style="cursor:pointer"></td>
       <td>${c.name}</td>
       <td class="mono">${c.account_no}</td>
       <td style="max-width:120px">${progTd}<br><button class="btn-sm" style="margin-top:4px;font-size:8px;padding:2px 7px" onclick='openManageEA("${c.id}","${c.name}")'>관리</button></td>
@@ -2170,8 +2200,85 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal','partner-limit-modal','bulk-import-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal','partner-limit-modal','bulk-import-modal','bulk-ea-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
+}
+
+function toggleSelectCustomer(id, checked) {
+  if (checked) selectedCustomerIds.add(id);
+  else selectedCustomerIds.delete(id);
+  updateBulkBar();
+  // 전체선택 체크박스 상태 동기화
+  const pageIds = _pagedList.slice((customerPage-1)*PAGE_SIZE, customerPage*PAGE_SIZE).map(c => c.id);
+  const allChecked = pageIds.length > 0 && pageIds.every(id => selectedCustomerIds.has(id));
+  const chkAll = document.getElementById('chk-all');
+  if (chkAll) chkAll.checked = allChecked;
+}
+
+function toggleSelectAll(checked) {
+  const pageSlice = _pagedList.slice((customerPage-1)*PAGE_SIZE, customerPage*PAGE_SIZE);
+  pageSlice.forEach(c => checked ? selectedCustomerIds.add(c.id) : selectedCustomerIds.delete(c.id));
+  updateBulkBar();
+  renderCustomers(_pagedList);
+}
+
+function clearSelection() {
+  selectedCustomerIds.clear();
+  updateBulkBar();
+  const chkAll = document.getElementById('chk-all');
+  if (chkAll) chkAll.checked = false;
+  renderCustomers(_pagedList);
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-ea-bar');
+  const cnt = selectedCustomerIds.size;
+  if (cnt > 0) {
+    document.getElementById('bulk-ea-count').textContent = `${cnt}명 선택됨`;
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function openBulkEAModal() {
+  const sel = document.getElementById('bulk-ea-program');
+  sel.innerHTML = allPrograms.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('bulk-ea-info').textContent = `선택된 고객 ${selectedCustomerIds.size}명에게 아래 EA 프로그램을 부여합니다.`;
+  document.getElementById('bulk-ea-result').style.display = 'none';
+  document.getElementById('bulk-ea-submit-btn').disabled = false;
+  document.getElementById('bulk-ea-submit-btn').textContent = '부여';
+  document.getElementById('bulk-ea-modal').classList.remove('hidden');
+}
+
+async function runBulkEAAssign() {
+  const programId = document.getElementById('bulk-ea-program').value;
+  if (!programId) return;
+  const btn = document.getElementById('bulk-ea-submit-btn');
+  const resultEl = document.getElementById('bulk-ea-result');
+  btn.disabled = true; btn.textContent = '처리 중...';
+
+  const ids = [...selectedCustomerIds];
+  const rows = ids.map(customer_id => ({ customer_id, program_id: programId }));
+
+  const CHUNK = 100;
+  let success = 0, errors = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error } = await sb.from('customer_programs')
+      .upsert(rows.slice(i, i + CHUNK), { onConflict: 'customer_id,program_id', ignoreDuplicates: true });
+    if (error) errors += Math.min(CHUNK, rows.length - i);
+    else success += Math.min(CHUNK, rows.length - i);
+  }
+
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = errors === 0
+    ? `<span style="color:var(--green);font-weight:600">✓ ${success}명에게 EA 부여 완료</span>`
+    : `<span style="color:var(--amber)">완료 ${success}명 / 오류 ${errors}명</span>`;
+  btn.disabled = false; btn.textContent = '부여';
+
+  clearSelection();
+  await loadCustomerPrograms();
+  renderCustomers(_pagedList);
 }
 
 function openBulkImportModal() {
