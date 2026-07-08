@@ -700,8 +700,8 @@ tr:hover td { background: rgba(255,255,255,.012); }
           <div class="alert-pill hidden" id="expiry-pill" onclick="showPage('expiry')">
             ⚠ 만료 임박 <span id="expiry-count-pill">0</span>명
           </div>
-          <button class="btn-primary hidden" id="btn-bulk-import" onclick="openBulkImportModal()" style="background:var(--green);margin-right:6px">⬆ 일괄 등록</button>
           <button class="btn-primary" onclick="openAddModal()">+ 고객 등록</button>
+          <button class="btn-primary hidden" id="btn-bulk-import" onclick="openBulkImportModal()" style="background:var(--green);margin-left:10px">⬆ 일괄 등록</button>
         </div>
       </div>
 
@@ -1088,7 +1088,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
     <div class="form-grid">
       <div class="form-group">
         <label class="form-label">팀명</label>
-        <input class="form-input" id="bulk-team" placeholder="PDD" style="margin:0" />
+        <input class="form-input" id="bulk-team" placeholder="팀명을 입력해주세요" style="margin:0" />
       </div>
       <div class="form-group">
         <label class="form-label">기본 만료일</label>
