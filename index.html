@@ -700,6 +700,7 @@ tr:hover td { background: rgba(255,255,255,.012); }
           <div class="alert-pill hidden" id="expiry-pill" onclick="showPage('expiry')">
             ⚠ 만료 임박 <span id="expiry-count-pill">0</span>명
           </div>
+          <button class="btn-primary hidden" id="btn-bulk-import" onclick="openBulkImportModal()" style="background:var(--green);margin-right:6px">⬆ 일괄 등록</button>
           <button class="btn-primary" onclick="openAddModal()">+ 고객 등록</button>
         </div>
       </div>
@@ -1075,6 +1076,42 @@ tr:hover td { background: rgba(255,255,255,.012); }
   </div>
 </div>
 
+<!-- 일괄 등록 모달 (총관리자 전용) -->
+<div class="modal-bg hidden" id="bulk-import-modal" onclick="closeModals()">
+  <div class="modal" style="width:500px" onclick="event.stopPropagation()">
+    <div class="modal-title">⬆ 일괄 고객 등록</div>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px;margin-bottom:14px;font-size:11px;color:var(--text2);line-height:1.7">
+      CSV 필수 컬럼: <span style="font-family:monospace;color:var(--purple-light)">account_no, name</span><br>
+      선택 컬럼: <span style="font-family:monospace;color:var(--text3)">expires_at</span> (YYYY-MM-DD, 비워두면 아래 기본값 사용)<br>
+      중복 계좌번호는 자동으로 건너뜁니다.
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">팀명</label>
+        <input class="form-input" id="bulk-team" placeholder="PDD" style="margin:0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">기본 만료일</label>
+        <input class="form-input" id="bulk-expires" type="date" style="margin:0" />
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:10px">
+      <label class="form-label">EA 프로그램</label>
+      <select class="form-input" id="bulk-program" style="margin:0"></select>
+    </div>
+    <div class="form-group" style="margin-top:10px">
+      <label class="form-label">CSV 파일</label>
+      <input type="file" accept=".csv" id="bulk-file" style="margin:0;color:var(--text);font-size:12px" onchange="previewBulkFile()" />
+    </div>
+    <div id="bulk-preview" style="display:none;margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px;font-size:11px;color:var(--text2);max-height:120px;overflow-y:auto;line-height:1.6"></div>
+    <div id="bulk-result" style="display:none;margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);font-size:12px"></div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeModals()">취소</button>
+      <button class="btn-primary" id="bulk-submit-btn" onclick="runBulkImport()">등록 시작</button>
+    </div>
+  </div>
+</div>
+
 <!-- 알림 모달 -->
 <div class="modal-bg hidden" id="alert-modal" onclick="resolveAlert()">
   <div class="modal" style="width:340px;text-align:center;padding:32px 28px" onclick="event.stopPropagation()">
@@ -1131,7 +1168,7 @@ let myAllowedProgIds  = null;       // null = 슈퍼어드민 (전체 허용)
 let extendTargetId    = null;
 let customerPage      = 1;
 let _pagedList        = [];
-const PAGE_SIZE       = 10;
+const PAGE_SIZE       = 50;
 let currentUser       = null;
 let isSuperAdmin      = false;
 let currentTeam       = null;
@@ -1204,16 +1241,18 @@ function startApp() {
     document.getElementById('page-programs').classList.remove('hidden');
     document.getElementById('filter-team').classList.remove('hidden');
     document.getElementById('th-team').classList.remove('hidden');
+    document.getElementById('btn-bulk-import').classList.remove('hidden');
   }
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
-  // 잔고 1분마다 자동 갱신
+  // 잔고 3분마다 자동 갱신 (EA 전송 주기 5분 기준, 탭 숨김 시 일시정지)
   setInterval(async () => {
+    if (document.hidden) return;
     await loadBalancesGlobal();
     renderCustomers(); renderDashboard(); renderExpiry(); renderStats();
-  }, 60000);
+  }, 180000);
 }
 
 /* ── DATA LOADING ── */
@@ -1281,17 +1320,20 @@ async function loadBalancesGlobal() {
   )];
 
   // ── 최신 잔고: latest_balances view (계좌별 최신 1행) ──
-  // .in() 필터로 현재 계좌만 조회 → 뷰 권한 문제 있어도 필요한 계좌만 가져옴
+  // 계좌가 많으면 .in() URL 길이 초과 → 300개씩 청크로 분할 요청
   if (accountNos.length > 0) {
-    const { data: latestData, error: latestErr } = await sb
-      .from('latest_balances')
-      .select('account_no, balance, equity, profit, logged_at')
-      .in('account_no', accountNos);
-    if (!latestErr && latestData && latestData.length > 0) {
-      applyLatestRows(latestData, true);
-    } else if (latestErr) {
-      console.warn('[잔고] latest_balances 조회 실패:', latestErr.message, '→ balance_logs 직접 조회');
-    }
+    const CHUNK = 300;
+    const chunks = [];
+    for (let i = 0; i < accountNos.length; i += CHUNK) chunks.push(accountNos.slice(i, i + CHUNK));
+    const results = await Promise.all(chunks.map(chunk =>
+      sb.from('latest_balances')
+        .select('account_no, balance, equity, profit, logged_at')
+        .in('account_no', chunk)
+    ));
+    const allRows = results.flatMap(r => r.data || []);
+    const anyErr  = results.find(r => r.error);
+    if (anyErr) console.warn('[잔고] latest_balances 조회 실패:', anyErr.error.message, '→ balance_logs 직접 조회');
+    if (allRows.length > 0) applyLatestRows(allRows, true);
   }
 
   // ── fallback: balance_logs 직접 조회 ──
@@ -1328,19 +1370,23 @@ async function loadBalancesGlobal() {
     applyLatestRows(looseResults.filter(Boolean));
   }
 
-  // ── 전일 잔고: balance_logs에서 기간 + limit 제한 조회 ──
-  const { data: prevData, error: prevErr } = await sb.from('balance_logs')
-    .select('account_no, balance, logged_at')
-    .lt('logged_at', todayStart.toISOString())
-    .gte('logged_at', yesterdayStart.toISOString())
-    .order('logged_at', { ascending: false })
-    .limit(500);
-  if (prevErr) console.error('[전일대비] balance_logs 조회 실패:', prevErr.message);
+  // ── 전일 잔고: prev_balances 뷰 사용 (계좌별 어제 최신 1행) ──
+  // limit(500) 방식은 2000계좌 시 대부분 누락 → 뷰에서 DISTINCT ON으로 정확히 1행씩
   prevBalMap = {};
-  if (prevData) {
-    prevData.forEach(b => {
+  if (accountNos.length > 0) {
+    const CHUNK = 300;
+    const prevChunks = [];
+    for (let i = 0; i < accountNos.length; i += CHUNK) prevChunks.push(accountNos.slice(i, i + CHUNK));
+    const prevResults = await Promise.all(prevChunks.map(chunk =>
+      sb.from('prev_balances')
+        .select('account_no, balance')
+        .in('account_no', chunk)
+    ));
+    const anyPrevErr = prevResults.find(r => r.error);
+    if (anyPrevErr) console.error('[전일대비] prev_balances 조회 실패:', anyPrevErr.error.message);
+    prevResults.flatMap(r => r.data || []).forEach(b => {
       const key = acctKey(b.account_no);
-      if (key && !prevBalMap[key]) prevBalMap[key] = { prev_balance: b.balance };
+      if (key) prevBalMap[key] = { prev_balance: b.balance };
     });
   }
 
@@ -2123,8 +2169,118 @@ function showPage(id) {
 function openAddModal()     { document.getElementById('add-modal').classList.remove('hidden'); }
 function openPartnerModal() { document.getElementById('partner-modal').classList.remove('hidden'); }
 function closeModals() {
-  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal','partner-limit-modal'].forEach(id =>
+  ['add-modal','extend-modal','partner-modal','edit-modal','addprogram-modal','partner-prog-modal','manage-ea-modal','partner-limit-modal','bulk-import-modal'].forEach(id =>
     document.getElementById(id)?.classList.add('hidden'));
+}
+
+function openBulkImportModal() {
+  document.getElementById('bulk-file').value = '';
+  document.getElementById('bulk-preview').style.display = 'none';
+  document.getElementById('bulk-result').style.display = 'none';
+  document.getElementById('bulk-submit-btn').disabled = false;
+  document.getElementById('bulk-submit-btn').textContent = '등록 시작';
+  const sel = document.getElementById('bulk-program');
+  sel.innerHTML = allPrograms.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 1);
+  document.getElementById('bulk-expires').value = d.toISOString().split('T')[0];
+  document.getElementById('bulk-import-modal').classList.remove('hidden');
+}
+
+function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+  return lines.slice(1).map(line => {
+    const vals = line.split(',').map(v => v.trim().replace(/"/g, ''));
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = vals[i] || ''; });
+    return obj;
+  }).filter(r => r.account_no);
+}
+
+function previewBulkFile() {
+  const file = document.getElementById('bulk-file').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCsv(e.target.result);
+    const el = document.getElementById('bulk-preview');
+    el.style.display = 'block';
+    if (!rows.length) { el.innerHTML = '<span style="color:var(--red)">데이터가 없거나 형식이 맞지 않습니다.</span>'; return; }
+    el.innerHTML = `<b style="color:var(--text)">${rows.length}명</b> 확인됨 &nbsp;(미리보기 5행)<br><br>` +
+      rows.slice(0, 5).map(r => `▸ ${r.account_no} &nbsp; ${r.name}${r.expires_at ? ' &nbsp; ' + r.expires_at : ''}`).join('<br>');
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+async function runBulkImport() {
+  const file      = document.getElementById('bulk-file').files[0];
+  const teamName  = document.getElementById('bulk-team').value.trim();
+  const expiresAt = document.getElementById('bulk-expires').value;
+  const programId = document.getElementById('bulk-program').value;
+  const resultEl  = document.getElementById('bulk-result');
+  const btn       = document.getElementById('bulk-submit-btn');
+
+  if (!file)      return alert('CSV 파일을 선택하세요.');
+  if (!teamName)  return alert('팀명을 입력하세요.');
+  if (!expiresAt) return alert('기본 만료일을 입력하세요.');
+  if (!programId) return alert('EA 프로그램을 선택하세요.');
+
+  btn.disabled = true;
+  btn.textContent = '등록 중...';
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<span style="color:var(--text2)">처리 중...</span>';
+
+  const text = await file.text();
+  const rows = parseCsv(text);
+  if (!rows.length) {
+    resultEl.innerHTML = '<span style="color:var(--red)">유효한 데이터가 없습니다.</span>';
+    btn.disabled = false; btn.textContent = '등록 시작'; return;
+  }
+
+  const defaultExpires = new Date(expiresAt).toISOString();
+  const toInsert = rows.map(r => ({
+    account_no:  String(r.account_no).trim(),
+    name:        r.name || '',
+    team_name:   teamName,
+    expires_at:  (r.expires_at && /\d{4}-\d{2}-\d{2}/.test(r.expires_at))
+                   ? new Date(r.expires_at).toISOString() : defaultExpires,
+    is_active:   true,
+    registered_by: currentUser.id,
+  }));
+
+  const CHUNK = 100;
+  let inserted = 0, skipped = 0, errors = 0;
+
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    resultEl.innerHTML = `<span style="color:var(--text2)">처리 중... ${Math.min(i + CHUNK, toInsert.length)} / ${toInsert.length}</span>`;
+    const chunk = toInsert.slice(i, i + CHUNK);
+    const { data, error } = await sb.from('customers_base')
+      .upsert(chunk, { onConflict: 'account_no', ignoreDuplicates: true })
+      .select('id');
+    if (error) { errors += chunk.length; continue; }
+    const newRows = data || [];
+    inserted += newRows.length;
+    skipped  += chunk.length - newRows.length;
+    if (newRows.length > 0) {
+      await sb.from('customer_programs')
+        .upsert(newRows.map(r => ({ customer_id: r.id, program_id: programId })),
+                { onConflict: 'customer_id,program_id', ignoreDuplicates: true });
+    }
+  }
+
+  resultEl.innerHTML = `
+    <div style="color:var(--green);font-weight:600;margin-bottom:4px">✓ 완료</div>
+    <div style="color:var(--text2)">
+      신규 등록 <b style="color:var(--green)">${inserted}명</b> &nbsp;|&nbsp;
+      중복 건너뜀 <b style="color:var(--text3)">${skipped}명</b>
+      ${errors > 0 ? `&nbsp;|&nbsp; 오류 <b style="color:var(--red)">${errors}명</b>` : ''}
+    </div>`;
+
+  btn.disabled = false; btn.textContent = '등록 시작';
+  await loadCustomers(); await loadCustomerPrograms();
+  renderCustomers(); renderDashboard();
 }
 
 /* ── 커스텀 알림/확인 모달 ── */
