@@ -1517,7 +1517,9 @@ function renderDashboard() {
   document.getElementById('m-expiry').textContent  = warn;
   document.getElementById('m-expired').textContent = expired;
   document.getElementById('nav-total').textContent  = total;
-  document.getElementById('nav-expiry').textContent = warn + expired;
+  // 만료 탭과 동일한 필터: 정지처리(is_active=false) 제외
+  const navExpiry = allCustomers.filter(c => c.status === 'warn' || (c.status === 'expired' && c.is_active)).length;
+  document.getElementById('nav-expiry').textContent = navExpiry;
 
   if (warn > 0) {
     document.getElementById('expiry-pill').classList.remove('hidden');
