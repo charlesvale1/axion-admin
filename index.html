@@ -1070,6 +1070,11 @@ tr:hover td { background: rgba(255,255,255,.012); }
         <select class="form-input" id="edit-program" style="margin:0"></select>
       </div>
     </div>
+    <!-- 총관리자 전용: 팀 수정 -->
+    <div class="form-group hidden" id="edit-team-group" style="margin-top:10px">
+      <label class="form-label">팀명 (관리자 전용)</label>
+      <input class="form-input" id="edit-team" style="margin:0" placeholder="팀명 입력" />
+    </div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="closeModals()">취소</button>
       <button class="btn-primary" onclick="saveEdit()">저장</button>
@@ -1931,6 +1936,15 @@ function openEdit(id) {
     `<option value="${p.id}" ${c.program_id === p.id ? 'selected' : ''}>${p.name}</option>`
   ).join('');
 
+  // 총관리자 전용 팀명 필드
+  const teamGroup = document.getElementById('edit-team-group');
+  if (isSuperAdmin) {
+    teamGroup.classList.remove('hidden');
+    document.getElementById('edit-team').value = c.team_name || '';
+  } else {
+    teamGroup.classList.add('hidden');
+  }
+
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1944,6 +1958,10 @@ async function saveEdit() {
     program_id:      progSel.value || null,
     program_name:    progName,
   };
+  if (isSuperAdmin) {
+    const teamVal = document.getElementById('edit-team').value.trim();
+    if (teamVal) payload.team_name = teamVal;
+  }
   if (!payload.name || !payload.account_no) {
     await showAlert('이름과 계좌번호를 입력해주세요.', '⚠️'); return;
   }
