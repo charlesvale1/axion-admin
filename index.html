@@ -645,6 +645,25 @@ tr:hover td { background: rgba(255,255,255,.012); }
   </div>
 </div>
 
+<!-- ── PASSWORD RESET SCREEN ── -->
+<div id="reset-screen" style="display:none;position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9999">
+  <div class="login-box">
+    <div class="login-wordmark">
+      <div class="login-logo">A T L A S</div>
+    </div>
+    <div class="login-sub">새 비밀번호 설정</div>
+    <div class="login-rule"></div>
+    <label class="form-label">새 비밀번호</label>
+    <input class="form-input" type="password" id="reset-pw1" placeholder="8자 이상 입력"
+      onkeydown="if(event.key==='Enter')doResetPassword()" />
+    <label class="form-label">비밀번호 확인</label>
+    <input class="form-input" type="password" id="reset-pw2" placeholder="동일하게 입력"
+      onkeydown="if(event.key==='Enter')doResetPassword()" />
+    <button class="btn-login" onclick="doResetPassword()">비밀번호 변경</button>
+    <div class="login-err" id="reset-err" style="display:none"></div>
+  </div>
+</div>
+
 <!-- ── APP ── -->
 <div id="app">
   <div class="layout">
@@ -2450,7 +2469,32 @@ function showToast(msg, isError = false) {
   setTimeout(() => t.style.display = 'none', 2800);
 }
 
+/* ── PASSWORD RESET ── */
+function showResetScreen() {
+  document.getElementById('login-screen').style.display = 'none';
+  const rs = document.getElementById('reset-screen');
+  rs.style.display = 'flex';
+}
+
+async function doResetPassword() {
+  const pw1 = document.getElementById('reset-pw1').value;
+  const pw2 = document.getElementById('reset-pw2').value;
+  const err = document.getElementById('reset-err');
+  err.style.display = 'none';
+  if (pw1.length < 8) { err.textContent = '비밀번호는 8자 이상이어야 합니다.'; err.style.display = 'block'; return; }
+  if (pw1 !== pw2)    { err.textContent = '비밀번호가 일치하지 않습니다.'; err.style.display = 'block'; return; }
+  const { error } = await sb.auth.updateUser({ password: pw1 });
+  if (error) { err.textContent = '오류: ' + error.message; err.style.display = 'block'; return; }
+  await sb.auth.signOut();
+  document.getElementById('reset-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  showToast('✅ 비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.');
+}
+
 /* ── INIT ── */
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'PASSWORD_RECOVERY') showResetScreen();
+});
 checkSession();
 </script>
 </body>
