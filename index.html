@@ -1326,18 +1326,34 @@ async function loadAll() {
   renderStats();
 }
 
+/* PostgREST는 요청당 기본 1000행 상한 → 전체 조회는 .range()로 끝까지 페이지네이션.
+   makeQuery: 호출마다 새 쿼리 빌더를 반환하는 함수 (빌더는 1회용이라 매 페이지 새로 만들어야 함).
+   정렬을 지정하지 않으면 페이지 간 순서가 불안정해 누락/중복이 날 수 있으니, 호출부에서 안정적 정렬을 건다. */
+async function fetchAllRows(makeQuery, pageSize = 1000) {
+  let from = 0;
+  const out = [];
+  for (;;) {
+    const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return out;
+}
+
 async function loadCustomerPrograms() {
   try {
-    const { data, error } = await sb.from('customer_programs')
-      .select('customer_id, programs(id, name)');
-    if (error) { console.error('[loadCustomerPrograms] error:', error); return; }
-    if (!data || data.length === 0) { console.warn('[loadCustomerPrograms] no data returned'); return; }
-    customerPrograms = {};
-    (data || []).forEach(r => {
+    const data = await fetchAllRows(() => sb.from('customer_programs')
+      .select('customer_id, programs(id, name)')
+      .order('customer_id').order('program_id'));   // 유니크 키 순 = 페이지네이션 안정
+    const map = {};
+    data.forEach(r => {
       if (!r.programs) return;
-      if (!customerPrograms[r.customer_id]) customerPrograms[r.customer_id] = [];
-      customerPrograms[r.customer_id].push({ id: r.programs.id, name: r.programs.name });
+      (map[r.customer_id] ||= []).push({ id: r.programs.id, name: r.programs.name });
     });
+    customerPrograms = map;   // 성공적으로 전량 로드된 뒤에만 교체 (부분 상태 방지)
   } catch(e) { console.error('[loadCustomerPrograms] exception:', e); }
 }
 
@@ -1481,10 +1497,16 @@ async function loadPrograms() {
 }
 
 async function loadCustomers() {
-  let q = sb.from('customers_base').select('*, programs(name)')
-    .order('created_at', { ascending: false });
-  if (!isSuperAdmin) q = q.eq('team_name', currentTeam);
-  const { data } = await q;
+  let data = [];
+  try {
+    data = await fetchAllRows(() => {
+      let q = sb.from('customers_base').select('*, programs(name)')
+        .order('created_at', { ascending: false })
+        .order('id');                    // created_at 동률 시 안정 정렬용 타이브레이커
+      if (!isSuperAdmin) q = q.eq('team_name', currentTeam);
+      return q;
+    });
+  } catch(e) { console.error('[loadCustomers] error:', e); return; }  // 실패 시 기존 목록 유지
   const now = new Date();
   allCustomers = (data || []).map(c => {
     const exp      = new Date(c.expires_at);
