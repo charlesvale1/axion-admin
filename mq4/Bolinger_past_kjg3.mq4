@@ -149,7 +149,10 @@ bool BPCheckLicense()
 
    char post[]; char result[]; string rh;
    ResetLastError();
-   int http = WebRequest("GET", url, headers, 10000, post, result, rh);
+   // 타임아웃을 짧게 잡는다. OnTimer는 OnTick과 같은 스레드이므로 대기하는 동안
+   // 유일한 청산 장치인 CheckSideBasket이 멈춘다. 긴 타임아웃은 이득 없이
+   // 무관리 구간만 늘린다.
+   int http = WebRequest("GET", url, headers, 3000, post, result, rh);
 
    if(http < 0)
    {
@@ -218,7 +221,8 @@ void BPSendBalance(bool force = false)
    ArrayResize(post, StringLen(body));
 
    ResetLastError();
-   int http = WebRequest("POST", g_ServerUrl + "/rest/v1/balance_logs", headers, 5000, post, result, rh);
+   // 스레드 블로킹 최소화 (CheckSideBasket 정지 방지)
+   int http = WebRequest("POST", g_ServerUrl + "/rest/v1/balance_logs", headers, 3000, post, result, rh);
 
    // 실패해도 갱신 — 오류 시 매 초 재시도하는 것을 막는다
    g_lastBalSend = TimeLocal();
