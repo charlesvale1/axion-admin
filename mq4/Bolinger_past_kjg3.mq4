@@ -315,9 +315,10 @@ void MaintainLicense()
 
    g_licenseFailStreak++;
 
-   // 최초 인증 전에는 g_licenseOK가 false이므로 아래 재청산 분기가 네트워크
-   // 장애에도 그대로 걸린다. 이를 막기 위해 확정 거부 여부와 무관하게 반환한다.
-   // 신규 진입은 TradingAllowed가 계속 차단하고, 기존 포지션은 CheckSideBasket에 맡긴다.
+   // 확정 거부라도 최초 인증 전이면 청산하지 않는다. 만료된 라이선스로 EA를
+   // 재시작한 경우 이전 세션의 그리드가 남아 있을 수 있는데, 이 EA가 그것을
+   // 진입시켰는지 확인할 방법이 없다. 신규 진입은 TradingAllowed가 계속 차단하고
+   // 보유분은 CheckSideBasket이 TP로 관리한다.
    if(!g_licenseChecked) return;
 
    // 이미 진입이 차단된 상태 — 확정 거부일 때만 잔여 포지션을 재청산한다.
