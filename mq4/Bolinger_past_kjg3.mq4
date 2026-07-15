@@ -86,6 +86,9 @@ input bool   SendBalance = true;          // 잔고 서버 전송
 input int    SendBalanceMinutes = 5;      // 잔고 전송 주기(분)
 input int    LicenseGraceTries = 5;       // 일시 장애 유예: 연속 실패 이 횟수까지 매매 유지(60초 간격, 상한 30)
 
+input string SETTING__________13 = "============ MIN EQUITY STOP ============";
+input double MinEquityStop = 50.0;        // 순자산/잔고가 이 값 이하면 전체 청산 후 EA 종료 (0=비활성)
+
 bool     g_running = false;
 datetime g_lastBarTime = 0;
 bool     g_upperBreakoutArmed = false;
@@ -117,6 +120,7 @@ bool     g_riskDeferred = false;  // 보유 포지션으로 모달을 보류한 
 bool     g_licenseChecked    = false;  // 최초 라이선스 확인 성공 여부
 bool     g_licenseDenied     = false;  // 서버가 명시적으로 거부(일시 장애와 구분)
 int      g_licenseFailStreak = 0;      // 연속 확인 실패 횟수
+bool     g_balanceHalt       = false;  // MinEquityStop 도달로 정지한 상태
 
 bool BPShowRiskPopup()
 {
@@ -401,11 +405,19 @@ void OnDeinit(const int reason)
    EventKillTimer();
    DeletePanel();
    DeleteBandObjects();
+
+   // 잔고 소진으로 스스로 종료한 경우에는 사유를 화면에 남긴다.
+   Comment(g_balanceHalt
+           ? "Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — EA 종료됨"
+           : "");
+
    Print("Bolinger_past deinitialized / reason=", reason);
 }
 
 void OnTimer()
 {
+   if(g_balanceHalt) return;   // 청산·종료는 OnTick의 CheckBalanceStop이 전담한다
+
    // 틱이 유실되거나 OnTick이 굶는 구간에서도 최소 1초 해상도로 바스켓을 관리한다.
    // MT4는 처리 중 도착한 틱을 큐잉하지 않고 버리므로, CheckSideBasket이 유일한
    // 청산 장치인 이상 이중화가 필요하다.
@@ -423,11 +435,46 @@ void OnTimer()
 }
 
 //+------------------------------------------------------------------+
+//| 순자산/잔고 최소값 도달 → 이 EA의 포지션 청산 후 EA 종료          |
+//+------------------------------------------------------------------+
+void CheckBalanceStop()
+{
+   if(!g_balanceHalt)
+   {
+      if(MinEquityStop <= 0) return;
+      if(AccountEquity() > MinEquityStop && AccountBalance() > MinEquityStop) return;
+
+      g_balanceHalt = true;
+      g_running     = false;
+      Print(">>> Bolinger_past: 순자산/잔고 ", DoubleToString(MinEquityStop, 2),
+            " 이하 도달 — 전체 청산 후 EA 종료 / Equity=", DoubleToString(AccountEquity(), 2),
+            " / Balance=", DoubleToString(AccountBalance(), 2));
+   }
+
+   // halt 상태에서는 잔여 포지션이 없어질 때까지 매 틱 재시도한다.
+   // CloseSide는 IsTargetOrder()로 Symbol·MagicNumber를 필터하므로 다른 EA나
+   // 다른 심볼의 포지션은 건드리지 않는다.
+   if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "MIN_EQUITY_STOP");
+   if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "MIN_EQUITY_STOP");
+
+   // 청산이 끝나기 전에 EA를 제거하면 남은 포지션이 브로커측 TP/SL 없이 방치된다.
+   if(CountSide(OP_BUY) > 0 || CountSide(OP_SELL) > 0)
+   {
+      Comment("Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — 청산 재시도 중");
+      return;
+   }
+
+   Comment("Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — EA 종료됨");
+   ExpertRemove();
+}
+
+//+------------------------------------------------------------------+
 //| 매매 허용 조건. 청산은 이 게이트와 무관하게 항상 실행된다.        |
 //+------------------------------------------------------------------+
 bool TradingAllowed()
 {
    if(!g_running)      return false;
+   if(g_balanceHalt)   return false;
    if(!g_licenseOK)    return false;
    if(!g_riskAccepted) return false;
    return true;
@@ -435,6 +482,13 @@ bool TradingAllowed()
 
 void OnTick()
 {
+   CheckBalanceStop();
+   if(g_balanceHalt)
+   {
+      if(ShowPanel) DrawPanel();
+      return;
+   }
+
    // 이 EA는 브로커측 TP/SL을 심지 않는다(OpenOrder의 sl=0, tp=0).
    // CheckSideBasket이 유일한 청산 장치이므로 라이선스·동의 상태와 무관하게
    // 항상 실행해야 보유 그리드가 방치되지 않는다.
