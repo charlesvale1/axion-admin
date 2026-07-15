@@ -1,9 +1,9 @@
 ﻿//+------------------------------------------------------------------+
-//| Eldorado_EA_Official_UI.mq4                                           |
+//| GOLDRUN_EA_Official_UI.mq4                                           |
 //| DQL(Diplomat Quant Logic) by HERITAGE ASSET                      |
-//| ELDORADO EA v9.1 — Official UI + Final Stop Safety                    |
+//| GOLDRUN EA v9.1 — Official UI + Final Stop Safety                    |
 //|                                                                  |
-//| 거래 로직: Eldorado_XAU_Clone_v1_6_Final_UI_Sync 완전 동일       |
+//| 거래 로직: GoldRun_XAU_Clone_v1_6_Final_UI_Sync 완전 동일       |
 //| v1.6 핵심:                                                        |
 //|  - SellGridPoints = 300 (v1.3의 330에서 수정)                    |
 //|  - MaxStepsPerSide = 99 (원본 설정 복원)                          |
@@ -12,14 +12,14 @@
 //|  - TPMode 0=포인트 / 1=달러 선택 가능                             |
 //+------------------------------------------------------------------+
 #property strict
-#property copyright "Made by 어쩌다전업"
+#property copyright "made by GOLDRUN"
 #property version   "9.10"
 
 //===================================================
 // [기본]
 //===================================================
 extern string SET_00                  = "======= EA 설정 =======";
-extern string EA_Name                 = "======= ELDORADO EA =======";
+extern string EA_Name                 = "======= GOLDRUN EA =======";
 extern int    MagicNumber             = 123456;
 extern string SET_01                  = "--- [1] 거래 방향 ---";
 extern bool   AllowBuy                = true;
@@ -37,6 +37,12 @@ extern int    GridPoints              = 300;
 extern int    BuyGridPoints           = 300;      // 0이면 GridPoints 사용
 extern int    SellGridPoints          = 300;      // 0이면 GridPoints 사용
 extern int    MaxStepsPerSide         = 99;
+extern string SET_TREND               = "--- [추세장 방어 - 공격형: 극단 추세만 차단] ---";
+extern bool   UseTrendFilter          = true;     // 추세 필터 사용
+extern int    TrendADXPeriod          = 14;       // 추세 판단 ADX 기간
+extern double TrendADXLevel           = 55.0;     // 공격형: 55 (극단 폭주만 차단, 추세 수익 최대 보존)
+extern double TrendDIGap              = 12.0;     // DI+/DI- 격차 (방향 확신 매우 클 때만)
+extern bool   TrendBlockReverse       = true;     // 추세 반대방향 신규 마틴 추가 중단
 extern int    MinSecondsBetweenAdds   = 5;
 extern int    ReEntryDelaySeconds     = 0;
 extern string SET_05                  = "--- [5] 청산 모드 ---";
@@ -76,7 +82,7 @@ extern bool   PrintDebug              = false;
 //===================================================
 extern string _80_ = "=== [8] AXION 라이선스 (변경금지) ===";
 extern string _81_ = "관리자페이지 등록 프로그램명과 일치해야 함";
-extern string 프로그램명             = "Eldorado_EA";
+extern string 프로그램명             = "GOLDRUN_EA";
 extern string _82_ = "서버 주소 (변경금지)";
 extern string 서버주소               = "https://wmvnearoursbmwjqwzww.supabase.co";
 extern string _83_ = "인증키 (변경금지)";
@@ -94,10 +100,10 @@ datetime g_lastSellClose = 0;
 datetime g_dayStart      = 0;
 double   g_dayStartEq    = 0;
 double   g_sessionStartEq= 0;
-bool     licenseOK           = false;
-string   licenseStatus       = "확인 중...";
-datetime 마지막라이센스체크  = 0;
-datetime 마지막잔고전송      = 0;
+bool     licenseOK       = false;
+bool     licenseChecked  = false;   // 라이센스 체크 완료 여부
+bool     riskAccepted    = false;   // 위험고지 동의 여부
+string   licenseStatus   = "확인 중...";
 bool     buyStopped      = false;
 bool     sellStopped     = false;
 bool     finalStopped    = false;
@@ -126,7 +132,7 @@ color CLR_DARK  = C'6,5,2';
 //+------------------------------------------------------------------+
 //| 유틸리티 — v1.6 완전 동일                                         |
 //+------------------------------------------------------------------+
-void Dbg(string s){ if(PrintDebug) Print("[ELDORADO EA] ",s); }
+void Dbg(string s){ if(PrintDebug) Print("[GOLDRUN EA] ",s); }
 double Pt(){ return MarketInfo(Symbol(),MODE_POINT); }
 int    Dig(){ return (int)MarketInfo(Symbol(),MODE_DIGITS); }
 double NPrice(double p){ return NormalizeDouble(p,Dig()); }
@@ -333,8 +339,8 @@ void TriggerFinalStop(string reason)
    if(CloseAllOnFinalStop){ CloseSide(OP_BUY); CloseSide(OP_SELL); }
    if(StopEAAfterFinal){ buyStopped=true; sellStopped=true; }
    if(AlertOnFinalStop)
-      Alert("ELDORADO EA STOP: ",reason," / Session P&L=",DoubleToString(SessionPnL(),2));
-   Print("ELDORADO FINAL STOP: ",reason,
+      Alert("GOLDRUN EA STOP: ",reason," / Session P&L=",DoubleToString(SessionPnL(),2));
+   Print("GOLDRUN FINAL STOP: ",reason,
          " SessionPnL=",DoubleToString(SessionPnL(),2));
    if(RemoveEAOnFinalStop) ExpertRemove();
 }
@@ -358,6 +364,32 @@ bool CheckFinalStop()
 //+------------------------------------------------------------------+
 //| 거래 로직 — v1.6 완전 동일                                        |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| 추세장 방어 — 극단 추세 시 역방향 마틴 차단 (공격형 C안)          |
+//+------------------------------------------------------------------+
+// 추세 방향: 1=상승추세, -1=하락추세, 0=추세없음(횡보)
+int TrendDirection()
+{
+   if(!UseTrendFilter) return 0;
+   double adx = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_MAIN,0);
+   double diP = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_PLUSDI,0);
+   double diM = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_MINUSDI,0);
+   if(adx < TrendADXLevel) return 0;                  // 추세 약함 → 양방향 정상
+   if(diP > diM + TrendDIGap) return 1;               // 상승 추세
+   if(diM > diP + TrendDIGap) return -1;              // 하락 추세
+   return 0;
+}
+
+// 해당 방향 신규 마틴이 추세 필터에 막히는지
+bool ReverseMartinBlocked(int type)
+{
+   if(!UseTrendFilter || !TrendBlockReverse) return false;
+   int dir = TrendDirection();
+   if(dir == 1  && type == OP_SELL) return true;      // 상승추세 → 매도 마틴 차단
+   if(dir == -1 && type == OP_BUY)  return true;      // 하락추세 → 매수 마틴 차단
+   return false;
+}
+
 void ManageBuy()
 {
    if(finalStopped) return;
@@ -372,6 +404,7 @@ void ManageBuy()
    SyncBasketTP(OP_BUY);
    if(count>=MaxStepsPerSide) return;
    if(g_lastBuyAdd>0&&(TimeCurrent()-g_lastBuyAdd)<MinSecondsBetweenAdds) return;
+   if(ReverseMartinBlocked(OP_BUY)) return;   // [추세 방어] 하락 추세 시 매수 마틴 중단
    double lastPrice=LastOpenPriceSide(OP_BUY); if(lastPrice<=0) return;
    double buyCheckPrice=BuyGridUseAsk?Ask:Bid;
    int    buyGrid=(BuyGridPoints>0?BuyGridPoints:GridPoints);
@@ -394,6 +427,7 @@ void ManageSell()
    SyncBasketTP(OP_SELL);
    if(count>=MaxStepsPerSide) return;
    if(g_lastSellAdd>0&&(TimeCurrent()-g_lastSellAdd)<MinSecondsBetweenAdds) return;
+   if(ReverseMartinBlocked(OP_SELL)) return;   // [추세 방어] 상승 추세 시 매도 마틴 중단
    double lastPrice=LastOpenPriceSide(OP_SELL); if(lastPrice<=0) return;
    double sellCheckPrice=SellGridUseAsk?Ask:Bid;
    int    sellGrid=(SellGridPoints>0?SellGridPoints:GridPoints);
@@ -436,8 +470,6 @@ void RiskChecks()
 
 void ProcessTrading()
 {
-   if(!licenseOK) return;
-
    RefreshRates();
    ResetDailyIfNeeded();
    UpdateTodayMDD();
@@ -472,44 +504,22 @@ void ProcessTrading()
 //+------------------------------------------------------------------+
 bool CheckLicense()
 {
-   string _acc  = IntegerToString((int)AccountNumber());
-   string _body = "{\"account_no\":\""+_acc+"\",\"program_name\":\""+프로그램명+"\"}";
-   char _p[]; char _r[]; string _rhs;
-   StringToCharArray(_body,_p,0,StringLen(_body)); ArrayResize(_p,StringLen(_body));
-
-   int _http = WebRequest("POST",
-                          서버주소+"/functions/v1/check-license",
-                          "Content-Type: application/json\r\n",
-                          10000, _p, _r, _rhs);
-
-   if(_http < 0)
-   {
-      int _e = GetLastError();
-      if(_e==4060) licenseStatus="WebRequest URL 미등록. MT4 설정 필요. ("+서버주소+")";
-      else licenseStatus="네트워크 오류 (err="+IntegerToString(_e)+")";
-      Print("Eldorado 라이센스 ERROR: ",licenseStatus);
-      return false;
-   }
-
-   string _resp = CharArrayToString(_r);
-   Print("Eldorado 라이센스 HTTP=",_http," body=",_resp);
-
-   if(_http!=200 || StringFind(_resp,"\"authorized\":true")<0)
-   {
-      string _reason = "라이센스 없음";
-      int _rp = StringFind(_resp,"\"reason\":\"");
-      if(_rp>=0){ _rp+=10; int _re=StringFind(_resp,"\"",_rp); if(_re>_rp) _reason=StringSubstr(_resp,_rp,_re-_rp); }
-      licenseStatus = _reason;
-      Print("Eldorado 라이센스 ERROR: ",licenseStatus);
-      return false;
-   }
-
-   string _expStr = "";
-   int _ep = StringFind(_resp,"\"expires_at\":\"");
-   if(_ep>=0) _expStr = StringSubstr(_resp,_ep+14,10);
-
-   licenseStatus = "정상 ("+_expStr+"까지)";
-   Print("Eldorado 라이센스 OK: ",licenseStatus);
+   string _acc=IntegerToString((int)AccountNumber());
+   string _pg=프로그램명;
+   StringReplace(_pg," ","%20"); StringReplace(_pg,"(","%28"); StringReplace(_pg,")","%29");
+   string _url=서버주소+"/rest/v1/customers?account_no=eq."+_acc+"&program_name=eq."+_pg+"&is_active=eq.true&select=expires_at";
+   string _rh="apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
+   char _p[];char _r[];string _rhs;
+   int _http=WebRequest("GET",_url,_rh,8000,_p,_r,_rhs);
+   string _body=CharArrayToString(_r);
+   Print("GOLDRUN EA License HTTP=",_http," body=",_body);
+   if(_http!=200||_body=="[]"||StringFind(_body,"expires_at")<0)
+   { licenseStatus="미등록 계좌 (HTTP="+IntegerToString(_http)+")"; return false; }
+   int _s=StringFind(_body,"\"expires_at\":\"")+14;
+   string _exp=StringSubstr(_body,_s,10); StringReplace(_exp,"-",".");
+   if(_exp<TimeToString(TimeCurrent(),TIME_DATE))
+   { licenseStatus="만료됨 ("+_exp+")"; return false; }
+   licenseStatus="정상 ("+_exp+"까지)";
    return true;
 }
 
@@ -517,9 +527,10 @@ void SendBalanceToSupabase()
 {
    string acc=IntegerToString((int)AccountNumber());
    string body="{\"account_no\":\""+acc+"\",\"balance\":"+DoubleToString(AccountBalance(),2)+",\"equity\":"+DoubleToString(AccountEquity(),2)+",\"profit\":"+DoubleToString(AccountEquity()-AccountBalance(),2)+"}";
+   string h="Content-Type: application/json\r\napikey: "+인증키+"\r\nAuthorization: Bearer "+인증키+"\r\nPrefer: return=minimal";
    char p[];char r[];string rh;
    StringToCharArray(body,p,0,StringLen(body));ArrayResize(p,StringLen(body));
-   WebRequest("POST",서버주소+"/functions/v1/submit-balance","Content-Type: application/json\r\n",5000,p,r,rh);
+   WebRequest("POST",서버주소+"/rest/v1/balance_logs",h,5000,p,r,rh);
 }
 
 //+------------------------------------------------------------------+
@@ -534,8 +545,8 @@ void SendBalanceToSupabase()
 // 좌측 코너일 때: XDISTANCE = 가로여백 + px
 // 상단 코너일 때: YDISTANCE = 세로여백 + py
 // 하단 코너일 때: YDISTANCE = (세로여백+패널높이) - py
-int PW = 360;
-int PH = 545;   // UI 확대 + MDD 표시 + 버튼영역
+int PW = 300;
+int PH = 352;   // 골드런 미니멀 레이아웃
 
 int GetCorner() { return DashboardCorner; }
 
@@ -551,6 +562,14 @@ int CY(int py)
    bool bottomSide = (DashboardCorner==2 || DashboardCorner==3);
    if(bottomSide) return DashboardY + PH - py;
    return DashboardY + py;
+}
+
+// 버튼 X 좌표 (idx: 0=왼쪽 1=가운데 2=오른쪽). 좌/우 코너 모두 균등 정렬
+int BtnX(int idx, int bw, int gap, int margin)
+{
+   // 카드(R함수)와 동일한 CX 좌표계 사용 → 패널 안에 정확히 정렬
+   int leftPx = margin + idx*(bw+gap);     // 패널 좌측 기준 버튼 왼쪽 X
+   return CX(leftPx);                       // CX가 코너에 맞게 자동 변환
 }
 
 void L(string id, string txt, int px, int py, int sz, color clr, string font="Arial Bold")
@@ -600,6 +619,56 @@ void HR(string id, int py, color clr)
    R(id, 0, py, PW+2, 1, clr, clr);
 }
 
+// 중앙정렬 라벨 (cx_px = 패널 좌측 기준 중심 X)
+void LC(string id, string txt, int cx_px, int py, int sz, color clr, string font="Arial Bold")
+{
+   string n = PFX + id;
+   if(ObjectFind(0,n)<0)
+   {
+      ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,n,OBJPROP_BACK,      false);
+   }
+   ObjectSetInteger(0,n,OBJPROP_CORNER,    GetCorner());
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,    ANCHOR_CENTER);
+   ObjectSetString (0,n,OBJPROP_TEXT,      txt);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE, CX(cx_px));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE, CY(py));
+   int finalSize = sz + DashboardFontBoost;
+   if(finalSize < 6) finalSize = 6;
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,  finalSize);
+   ObjectSetInteger(0,n,OBJPROP_COLOR,     clr);
+   ObjectSetString (0,n,OBJPROP_FONT,      font);
+   ObjectSetInteger(0,n,OBJPROP_ZORDER,    1);
+}
+
+// 콤마 + 소수 2자리 ($2,068.15 형태)
+string FmtMoney2(double v)
+{
+   bool neg = v<0; v=MathAbs(v);
+   string ip = DoubleToString(MathFloor(v),0);
+   int len=StringLen(ip); string out="";
+   for(int i=0;i<len;i++){ if(i>0 && (len-i)%3==0) out+=","; out+=StringSubstr(ip,i,1); }
+   int cents=(int)MathRound((v-MathFloor(v))*100.0);
+   string cs=IntegerToString(cents); if(StringLen(cs)<2) cs="0"+cs;
+   return (neg?"-":"")+out+"."+cs;
+}
+
+
+// 천단위 콤마 포맷 ($410,369 형태)
+string FmtK(double v)
+{
+   string s = DoubleToString(MathAbs(v), 0);
+   int len = StringLen(s);
+   string out = "";
+   for(int i=0; i<len; i++)
+   {
+      if(i>0 && (len-i)%3==0) out += ",";
+      out += StringSubstr(s, i, 1);
+   }
+   return (v<0?"-":"") + out;
+}
+
 string MoneyStr(double v)
 {
    return (v>=0 ? "+$" : "-$") + DoubleToString(MathAbs(v),2);
@@ -609,18 +678,18 @@ color MoneyClr(double v) { return v>=0 ? CLR_GREEN : CLR_RED; }
 //--- 버튼 생성 (OnInit에서 한 번만 호출)
 void CreateButtons()
 {
-   int bw = 110;  // 버튼 너비(UI 확대)
-   int bh = 34;   // 버튼 높이(UI 확대)
-   int gap = 8;   // 버튼 간격
+   int M2  = 14;   // 카드와 동일한 좌우 여백
+   int gap = 6;    // 버튼 간격
+   int bw  = (PW - M2*2 - gap*2) / 3;  // 카드 폭에 맞춘 버튼 너비
+   int bh  = 34;   // 버튼 높이
 
-   // 버튼 Y 위치: 패널 하단
-   int btnY = CY(PH - 33);  // 패널 최하단 (콘텐츠 396 이후)
-   bool rightSide = (DashboardCorner==1 || DashboardCorner==3);
+   // 버튼 Y 위치: 패널 하단 (미니멀 레이아웃)
+   int btnY = CY(PH - 40);
 
    // SELL STOP (왼쪽)
    if(ObjectFind(0,BTN_SELL)<0) ObjectCreate(0,BTN_SELL,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_SELL,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw*3 + gap*2 : DashboardX);
+   ObjectSetInteger(0,BTN_SELL,OBJPROP_XDISTANCE, BtnX(0, bw, gap, M2));
    ObjectSetInteger(0,BTN_SELL,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_YSIZE,     bh);
@@ -634,7 +703,7 @@ void CreateButtons()
    // BUY STOP (가운데)
    if(ObjectFind(0,BTN_BUY)<0) ObjectCreate(0,BTN_BUY,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_BUY,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw*2 + gap : DashboardX + bw + gap);
+   ObjectSetInteger(0,BTN_BUY,OBJPROP_XDISTANCE, BtnX(1, bw, gap, M2));
    ObjectSetInteger(0,BTN_BUY,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_YSIZE,     bh);
@@ -648,7 +717,7 @@ void CreateButtons()
    // CLOSE ALL (오른쪽)
    if(ObjectFind(0,BTN_CLOSE)<0) ObjectCreate(0,BTN_CLOSE,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw + gap : DashboardX + (bw+gap)*2);
+   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XDISTANCE, BtnX(2, bw, gap, M2));
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_YSIZE,     bh);
@@ -665,29 +734,32 @@ void CreateButtons()
 
 void RefreshButtonLabels()
 {
-   // SELL STOP 버튼
+   // SELL STOP 버튼 (빨강)
    if(ObjectFind(0,BTN_SELL)>=0)
    {
       string t  = finalStopped ? "STOPPED" : (sellStopped ? "SELL  ON" : "SELL STOP");
-      color  bg = finalStopped ? C'50,10,10' : (sellStopped ? C'20,110,45' : C'170,35,35');
-      ObjectSetString (0,BTN_SELL,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'50,10,10' : (sellStopped ? C'30,120,55' : C'190,45,45');
+      ObjectSetString (0,BTN_SELL,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_SELL,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_SELL,OBJPROP_COLOR,   clrWhite);
    }
-   // BUY STOP 버튼
+   // BUY STOP 버튼 (초록)
    if(ObjectFind(0,BTN_BUY)>=0)
    {
       string t  = finalStopped ? "STOPPED" : (buyStopped ? "BUY   ON" : "BUY  STOP");
-      color  bg = finalStopped ? C'50,10,10' : (buyStopped ? C'20,110,45' : C'25,75,180');
-      ObjectSetString (0,BTN_BUY,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'50,10,10' : (buyStopped ? C'30,120,55' : C'35,150,72');
+      ObjectSetString (0,BTN_BUY,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_BUY,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_BUY,OBJPROP_COLOR,   clrWhite);
    }
-   // CLOSE ALL 버튼
+   // CLOSE ALL 버튼 (골드 / 어두운 글씨)
    if(ObjectFind(0,BTN_CLOSE)>=0)
    {
       string t  = finalStopped ? "CLOSED" : "CLOSE ALL";
-      color  bg = finalStopped ? C'40,40,40' : C'120,25,25';
-      ObjectSetString (0,BTN_CLOSE,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'70,55,15' : C'205,165,55';
+      ObjectSetString (0,BTN_CLOSE,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_CLOSE,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_CLOSE,OBJPROP_COLOR,   C'30,22,4');
    }
    ChartRedraw(0);
 }
@@ -702,7 +774,7 @@ void PollButtons()
       if(!finalStopped)
       {
          sellStopped = !sellStopped;
-         Print("ELDORADO: SELL ", sellStopped?"STOPPED":"RESUMED");
+         Print("GOLDRUN: SELL ", sellStopped?"STOPPED":"RESUMED");
       }
       RefreshButtonLabels();
    }
@@ -713,7 +785,7 @@ void PollButtons()
       if(!finalStopped)
       {
          buyStopped = !buyStopped;
-         Print("ELDORADO: BUY ", buyStopped?"STOPPED":"RESUMED");
+         Print("GOLDRUN: BUY ", buyStopped?"STOPPED":"RESUMED");
       }
       RefreshButtonLabels();
    }
@@ -723,7 +795,7 @@ void PollButtons()
       ObjectSetInteger(0,BTN_CLOSE,OBJPROP_STATE,false);
       if(!finalStopped)
       {
-         Print("ELDORADO: CLOSE ALL 실행");
+         Print("GOLDRUN: CLOSE ALL 실행");
          CloseSide(OP_BUY);
          CloseSide(OP_SELL);
          buyStopped   = true;
@@ -731,7 +803,7 @@ void PollButtons()
          finalStopped = true;
          finalReason  = "MANUAL CLOSE ALL";
          finalStopTime= TimeCurrent();
-         if(AlertOnFinalStop) Alert("ELDORADO EA: 전체 청산 완료. 신규 진입 중단.");
+         if(AlertOnFinalStop) Alert("GOLDRUN EA: 전체 청산 완료. 신규 진입 중단.");
       }
       RefreshButtonLabels();
    }
@@ -767,185 +839,81 @@ void DrawDashboard()
    double equity  = AccountEquity();
    double balance = AccountBalance();
    double dayPnL  = equity - g_dayStartEq;
-   double sessPnL = equity - g_sessionStartEq;
-   double pnlPct  = balance>0 ? dayPnL/balance*100.0 : 0;
-   double spread  = MarketInfo(Symbol(),MODE_SPREAD);
+   double dayPct  = balance>0 ? dayPnL/balance*100.0 : 0;
 
-   int    bc   = CountSide(OP_BUY);
-   int    sc   = CountSide(OP_SELL);
-   double bl   = TotalLotsSide(OP_BUY);
-   double sl   = TotalLotsSide(OP_SELL);
-   double bAvg = WeightedAvgSide(OP_BUY);
-   double sAvg = WeightedAvgSide(OP_SELL);
-   double bTP  = BasketTPPrice(OP_BUY);
-   double sTP  = BasketTPPrice(OP_SELL);
-   double bFL  = BasketProfitSide(OP_BUY);
-   double sFL  = BasketProfitSide(OP_SELL);
-   double tFL  = bFL + sFL;
+   int    bc = CountSide(OP_BUY);
+   int    sc = CountSide(OP_SELL);
+   double bFL = BasketProfitSide(OP_BUY);
+   double sFL = BasketProfitSide(OP_SELL);
+   double tFL = bFL + sFL;                       // 현재 플로팅 손익
+   double curPct = balance>0 ? tFL/balance*100.0 : 0;
 
-   datetime today  = iTime(Symbol(),PERIOD_D1,0);
-   MqlDateTime md; TimeToStruct(today,md);
-   md.day=1; md.hour=0; md.min=0; md.sec=0;
-   datetime mon1 = StructToTime(md);
+   // ─── 색상 ───────────────────────────────────────────
+   color BG    = C'8,8,10';
+   color GOLD  = C'212,175,80';     // 골드런 타이틀 골드
+   color GOLD2 = C'150,128,70';
+   color W     = C'235,232,222';
+   color GRY   = C'130,128,120';
+   color GRN   = C'70,200,110';
+   color RD     = C'225,80,80';
+   color BLU    = C'90,150,225';
+   color LINE   = C'58,50,28';      // 옅은 골드 구분선
 
-   double todayP = GetHistoryProfit(today, today+86400);
-   double yestP  = GetHistoryProfit(today-86400, today);
-   double monP   = GetHistoryProfit(mon1, today+86400);
-   double todayL = GetHistoryLots(today, today+86400);
-   double yestL  = GetHistoryLots(today-86400, today);
+   int CXc = PW/2;                  // 중앙
+   int CL  = (int)(PW*0.34);        // 좌측 컬럼(BUY)
+   int CR  = (int)(PW*0.66);        // 우측 컬럼(SELL)
 
-   double adx = iADX(Symbol(),PERIOD_CURRENT,PulsePeriod,PRICE_CLOSE,MODE_MAIN,0);
-   double diP = iADX(Symbol(),PERIOD_CURRENT,PulsePeriod,PRICE_CLOSE,MODE_PLUSDI,0);
-   double diM = iADX(Symbol(),PERIOD_CURRENT,PulsePeriod,PRICE_CLOSE,MODE_MINUSDI,0);
-   string trend = adx>=PulseRangeLevel ? (diP>diM?"BULL TREND":"BEAR TREND") : "RANGE";
-   color  tc    = trend=="BULL TREND" ? CLR_GREEN : (trend=="BEAR TREND" ? CLR_RED : CLR_GOLD);
+   // ── [1] 타이틀 GOLD RUN (골드 세리프) ──
+   LC("T1","G O L D   R U N", CXc, 22, 19, GOLD, "Times New Roman Bold");
 
-   string ft = FinalTakeProfitDollars>0 ? "$"+DoubleToString(FinalTakeProfitDollars,0) : "OFF";
-   string fs = FinalStopLossDollars>0   ? "$"+DoubleToString(FinalStopLossDollars,0)   : "OFF";
+   // ── [2] BALANCE ──
+   LC("BLBL","BALANCE", CXc, 52, 8, GRY, "Arial");
+   LC("BVAL","$"+FmtMoney2(balance), CXc, 70, 19, W, "Arial Bold");
 
-   string stTxt = "RUNNING";
-   color  stClr = CLR_GREEN;
-   if(!licenseOK)                   { stTxt="NO LICENSE";   stClr=CLR_RED;  }
-   else if(finalStopped)            { stTxt=finalReason;    stClr=CLR_RED;  }
-   else if(buyStopped&&sellStopped) { stTxt="ALL STOPPED";  stClr=CLR_GRAY; }
-   else if(buyStopped)              { stTxt="BUY STOPPED";  stClr=CLR_GRAY; }
-   else if(sellStopped)             { stTxt="SELL STOPPED"; stClr=CLR_GRAY; }
+   string sub = (dayPnL>=0?"+$":"-$")+DoubleToString(MathAbs(dayPnL),2)
+              + "   |   " + (dayPct>=0?"+":"")+DoubleToString(dayPct,2)+"%"
+              + "   |   Monthly";
+   LC("BSUB", sub, CXc, 94, 8, GRY, "Arial");
 
-   color CB = C'7,5,1';     // 배경
-   color CH = C'18,13,3';   // 헤더 배경
-   color CS = C'13,10,2';   // 섹션 배경
-   color CL = C'60,45,5';   // 테두리
-   color CL2= C'40,30,3';   // 얇은 구분선
-   color W  = CLR_WHITE;
-   color G  = CLR_GOLD;
-   color G2 = CLR_GOLD2;
-   color GR = CLR_GREEN;
-   color RD = CLR_RED;
+   // ── 구분선 ──
+   HR("hr1", 114, LINE);
 
-   // ─── 행 Y 위치 정의 (위→아래, py=0이 패널 최상단) ───
-   int y = 0;   // 현재 y 커서
+   // ── [3] CURRENT PnL (대형 %) ──
+   LC("CPV", (curPct>=0?"+":"")+DoubleToString(curPct,1)+"%", CXc, 134, 24,
+      tFL>=0 ? W : RD, "Arial Bold");
+   LC("CPL","CURRENT PnL", CXc, 166, 9, GRY, "Arial");
 
-   // [A] 패널 배경
-   R("bg", 0, y, PW+2, PH, CB, CL);
+   // ── 구분선 ──
+   HR("hr2", 186, LINE);
 
-   // [B] 헤더
-   R("hd", 0, y, PW+2, 50, CH, CL);
-   L("T1","E L D O R A D O",        42, y+6,  18, G,  "Times New Roman Bold");
-   L("T2","Made by 어쩌다전업",             88, y+32, 8, G2, "Malgun Gothic");
-   L("T3","v9.2",                   315,y+32,  7, G2, "Arial");
-   y += 50;
+   // ── [4] ORDERS (0 BUY | 0 SELL) ──
+   LC("OBV", IntegerToString(bc), CL, 204, 15, BLU, "Arial Bold");
+   LC("OBL","BUY",  CL, 226, 8, GRY, "Arial");
+   LC("OSEP","|",   CXc, 208, 13, GRY, "Arial");
+   LC("OSV", IntegerToString(sc), CR, 204, 15, BLU, "Arial Bold");
+   LC("OSL","SELL", CR, 226, 8, GRY, "Arial");
+   LC("OLBL","ORDERS", CXc, 244, 8, GRY, "Arial");
 
-   // [C] 심볼 / 시간 / 스프레드 바
-   R("sb", 0, y, PW+2, 22, CS, CL2);
-   L("SY",Symbol(),                         8, y+5,  10, W,  "Arial Bold");
-   L("TI",TimeToString(TimeCurrent(),TIME_SECONDS), 96, y+6, 9, G2, "Arial");
-   L("SP","Spd "+DoubleToString(spread,0),  212,y+6,  9, spread>60?RD:G2, "Arial");
-   y += 22;
+   // ── 구분선 ──
+   HR("hr3", 264, LINE);
 
-   // 구분선
-   R("l0",0,y,PW+2,1,CL,CL); y+=1;
+   // ── [5] 상태 (COOLING / READY) ──
+   datetime lastAdd = (g_lastBuyAdd>g_lastSellAdd)?g_lastBuyAdd:g_lastSellAdd;
+   bool cooling = (MinSecondsBetweenAdds>0 && lastAdd>0
+                   && (TimeCurrent()-lastAdd) < MinSecondsBetweenAdds);
+   string w1 = cooling ? "COOLING" : "ACTIVE";
+   color  c1 = cooling ? GOLD : GRN;
 
-   // [D] BALANCE / EQUITY / DAY P&L 3분할
-   R("ca",  0,  y, PW+2, 40, CS, CL2);
-   R("cd1", 93, y, 1,    40, CL2, CL2);
-   R("cd2", 188,y, 1,    40, CL2, CL2);
-   L("H1","BALANCE",  8,  y+4,  7, G2,"Arial");
-   L("H2","EQUITY",  100, y+4,  7, G2,"Arial");
-   L("H3","DAY P&L", 196, y+4,  7, G2,"Arial");
-   L("V1","$"+DoubleToString(balance,0), 8,  y+18, 11, W, "Arial Bold");
-   L("V2","$"+DoubleToString(equity,0),  100,y+18, 11, equity>=balance?GR:RD,"Arial Bold");
-   L("V3",MoneyStr(dayPnL),              196,y+18, 11, MoneyClr(dayPnL),"Arial Bold");
-   y += 40;
+   string w2; color c2;
+   if(!licenseOK)             { w2="NO LICENSE"; c2=RD; }
+   else if(finalStopped)      { w2="STOPPED";    c2=RD; }
+   else if(!riskAccepted)     { w2="WAIT";       c2=GRY; }
+   else                       { w2="READY";      c2=GRN; }
 
-   // [D-2] 오늘 최대 MDD
-   R("mdd", 0, y, PW+2, 24, dayPnL>=0?C'10,8,2':C'22,6,6', CL2);
-   L("MD1","TODAY MAX MDD", 8, y+5, 8, G2, "Arial Bold");
-   L("MD2",MDDStr(),        190, y+5, 10, g_todayMaxMDD>0?RD:G2, "Arial Bold");
-   y += 24;
+   LC("ST1", w1, (int)(PW*0.30), 282, 10, c1, "Arial Bold");
+   LC("ST2", w2, (int)(PW*0.70), 282, 10, c2, "Arial Bold");
 
-   // 구분선
-   R("l1",0,y,PW+2,1,CL,CL); y+=2;
-
-   // [E] LONG / SHORT 테이블 헤더
-   R("th", 0, y, PW+2, 20, C'15,11,3', CL2);
-   R("tv", 138,y, 1, 20, CL2, CL2);
-   L("LH","LONG  (BUY)",  8,  y+4, 9, GR,"Arial Bold");
-   L("SH","SHORT (SELL)", 148,y+4, 9, RD,"Arial Bold");
-   y += 20;
-
-   // 테이블 행 간격
-   int rh = 21;
-
-   // Orders
-   R("r0",0,y,PW+2,rh, CB,CL2); R("rv0",138,y,1,rh,CL2,CL2);
-   L("L0","Orders",  8,  y+2, 8, G2,"Arial"); L("LV0",IntegerToString(bc),90, y+2,9,W,"Arial Bold");
-   L("R0","Orders",148,  y+2, 8, G2,"Arial"); L("RV0",IntegerToString(sc),230,y+2,9,W,"Arial Bold");
-   y += rh;
-
-   // Lots
-   R("r1",0,y,PW+2,rh,CB,CL2); R("rv1",138,y,1,rh,CL2,CL2);
-   L("L1","Lots",    8,  y+2, 8, G2,"Arial"); L("LV1",DoubleToString(bl,2),90, y+2,9,W,"Arial Bold");
-   L("R1","Lots",  148,  y+2, 8, G2,"Arial"); L("RV1",DoubleToString(sl,2),230,y+2,9,W,"Arial Bold");
-   y += rh;
-
-   // Avg Price
-   R("r2",0,y,PW+2,rh,CB,CL2); R("rv2",138,y,1,rh,CL2,CL2);
-   L("L2","Avg",     8,  y+2, 8, G2,"Arial"); L("LV2",bAvg>0?DoubleToString(bAvg,Dig()):"-",90, y+2,8,G,"Arial");
-   L("R2","Avg",   148,  y+2, 8, G2,"Arial"); L("RV2",sAvg>0?DoubleToString(sAvg,Dig()):"-",230,y+2,8,G,"Arial");
-   y += rh;
-
-   // Basket TP
-   R("r3",0,y,PW+2,rh,CB,CL2); R("rv3",138,y,1,rh,CL2,CL2);
-   L("L3","Basket TP",8,  y+2, 8, G,"Arial"); L("LV3",bTP>0?DoubleToString(bTP,Dig()):"-",90, y+2,8,G,"Arial");
-   L("R3","Basket TP",148,y+2, 8, G,"Arial"); L("RV3",sTP>0?DoubleToString(sTP,Dig()):"-",230,y+2,8,G,"Arial");
-   y += rh;
-
-   // Float P&L
-   R("r4",0,y,PW+2,rh,CB,CL2); R("rv4",138,y,1,rh,CL2,CL2);
-   L("L4","Float P&L",8,  y+2, 8, G2,"Arial Bold"); L("LV4",MoneyStr(bFL),90, y+2,10,MoneyClr(bFL),"Arial Bold");
-   L("R4","Float P&L",148,y+2, 8, G2,"Arial Bold"); L("RV4",MoneyStr(sFL),230,y+2,10,MoneyClr(sFL),"Arial Bold");
-   y += rh;
-
-   // Total Float 강조
-   R("rt",0,y,PW+2,20, tFL>=0?C'8,28,8':C'28,6,6', CL);
-   L("TF","TOTAL FLOAT P&L", 8,y+3, 9,W,"Arial Bold");
-   L("TV",MoneyStr(tFL),      185,y+3,11,MoneyClr(tFL),"Arial Bold");
-   y += 20;
-
-   R("l2",0,y,PW+2,1,CL,CL); y+=2;
-
-   // [F] 장세 분석
-   R("ab",0,y,PW+2,20,CS,CL2);
-   L("A1","ADX "+DoubleToString(adx,1), 8,  y+3, 8, W,"Arial");
-   L("A2","DI+ "+DoubleToString(diP,1)+" / DI- "+DoubleToString(diM,1), 88,y+3,8,diP>=diM?GR:RD,"Arial");
-   L("A3",trend, 210,y+3, 9,tc,"Arial Bold");
-   y += 20;
-
-   R("l3",0,y,PW+2,1,CL,CL); y+=2;
-
-   // [G] PERFORMANCE
-   L("PH","PERFORMANCE", 8,y+2, 9,W,"Arial Bold"); y+=20;
-   L("PM","Month  "+MoneyStr(monP),  8,y,8,MoneyClr(monP),"Arial");  y+=20;
-   L("PY","Yest   "+TimeToString(today-86400,TIME_DATE)+"  "+MoneyStr(yestP)+"  "+DoubleToString(yestL,2)+"lot", 8,y,8,MoneyClr(yestP),"Arial"); y+=20;
-   L("PD","Today  "+TimeToString(today,TIME_DATE)+"  "+MoneyStr(todayP)+"  "+DoubleToString(todayL,2)+"lot",     8,y,8,MoneyClr(todayP),"Arial"); y+=20;
-   L("PS","Session P&L  "+MoneyStr(sessPnL), 8,y,9,MoneyClr(sessPnL),"Arial Bold"); y+=22;
-
-   R("l4",0,y,PW+2,1,CL,CL); y+=2;
-
-   // [H] 상태 / Final TP·SL
-   R("sb2",0,y,PW+2,34,CS,CL2);
-   L("ST",stTxt,                          8,y+3, 10,stClr,"Arial Bold");
-   L("LI","Lic "+(licenseOK?"OK":"NO"),  210,y+3,  8,licenseOK?GR:RD,"Arial");
-   L("FT","FinalTP "+ft+"  /  SL "+fs,    8,y+18, 7, G2,"Arial");
-   y += 34;
-
-   R("l5",0,y,PW+2,2,CL,CL); y+=4;
-
-   // 버튼 영역 배경 (버튼은 CreateButtons에서 y 위치 갱신)
-   R("bb",0,y,PW+2,36,C'10,7,1',CL);
-
-   // PH를 실제 높이에 맞게 업데이트
-   // (버튼은 아래 CreateButtons/RefreshButtonLabels에서 위치 설정)
+   // ── 버튼: CreateButtons가 위치 잡음 ──
    RefreshButtonLabels();
    ChartRedraw(0);
 }
@@ -954,16 +922,12 @@ void DrawDashboard()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   licenseOK=false; licenseStatus="확인 중...";
+   licenseOK      = false;
+   licenseChecked = false;
+   riskAccepted   = false;
    buyStopped=false; sellStopped=false;
    finalStopped=false; finalReason=""; finalStopTime=0; totalCycles=0;
-   Comment("ELDORADO EA: 라이선스 확인 중...");
-   Sleep(300);
 
-   if(!CheckLicense())
-   { Comment("ELDORADO EA: "+licenseStatus); return(INIT_FAILED); }
-
-   licenseOK      = true;
    g_dayStart      = iTime(Symbol(),PERIOD_D1,0);
    g_dayStartEq    = AccountEquity();
    g_sessionStartEq= AccountEquity();
@@ -971,17 +935,51 @@ int OnInit()
    g_todayMaxMDD   = 0.0;
    g_todayMaxMDDPct= 0.0;
 
-   CreateButtons();   // 버튼은 여기서 딱 한 번만 생성
-   EventSetTimer(1);
-   Print("ELDORADO EA v9.1 OK | Acc=",AccountNumber()," | ",licenseStatus);
+   CreateButtons();
+   EventSetTimer(1);   // 1초 타이머 → OnTimer에서 라이센스 체크
+   Comment("GOLDRUN EA: 잠시 후 라이센스 확인...");
+   Print("GOLDRUN EA v9.1 초기화 | Acc=",AccountNumber());
    return(INIT_SUCCEEDED);
 }
 
 void OnDeinit(const int reason){ EventKillTimer(); DeleteAllObjects(); Comment(""); }
 
+
+//+------------------------------------------------------------------+
+//| 잔고 $50 이하 → 전체 청산 후 EA 즉시 종료                          |
+//+------------------------------------------------------------------+
+bool g_balanceHalt = false;
+void CheckBalanceStop()
+{
+   if(g_balanceHalt) return;
+   if(AccountBalance() <= 50.0)
+   {
+      g_balanceHalt = true;
+      // 보유 포지션 전체 청산
+      for(int i = OrdersTotal()-1; i >= 0; i--)
+      {
+         if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         {
+            if(OrderType()==OP_BUY)
+               OrderClose(OrderTicket(), OrderLots(), Bid, 50, clrRed);
+            else if(OrderType()==OP_SELL)
+               OrderClose(OrderTicket(), OrderLots(), Ask, 50, clrRed);
+            else
+               OrderDelete(OrderTicket());
+         }
+      }
+      Print(">>> 잔고 $50 이하 도달 - EA 종료");
+      Comment("잔고 $50 이하 - EA 종료됨");
+      ExpertRemove();   // EA를 차트에서 즉시 제거 (서버 부하 제거)
+   }
+}
+
 void OnTick()
 {
-   PollButtons();       // 버튼 폴링 먼저
+   CheckBalanceStop();   if(g_balanceHalt) return;
+
+   PollButtons();
+   if(!licenseChecked || !riskAccepted) return;  // 라이센스/동의 전엔 거래 안 함
    ProcessTrading();
 }
 
@@ -989,31 +987,49 @@ void OnTimer()
 {
    PollButtons();
 
-   // 라이선스 재확인 (OK: 1시간 / 실패: 60초마다 자동 복구 시도)
-   int _reChkSec = licenseOK ? 3600 : 60;
-   if(TimeCurrent()-마지막라이센스체크 >= _reChkSec)
+   // ── 라이센스 + 위험고지: 아직 안 됐으면 여기서 처리
+   if(!licenseChecked)
    {
-      마지막라이센스체크 = TimeCurrent();
+      Comment("GOLDRUN EA: 라이센스 확인 중...");
       if(!CheckLicense())
       {
-         if(licenseOK)
-         {
-            licenseOK = false;
-            Print("Eldorado: 라이선스 정지됨. 전체 청산.");
-            CloseSide(OP_BUY);
-            CloseSide(OP_SELL);
-            buyStopped=true; sellStopped=true;
-         }
+         Comment("GOLDRUN EA: 라이센스 없음 — " + licenseStatus);
+         Print("GOLDRUN EA 라이센스 실패: ", licenseStatus);
          return;
       }
-      licenseOK = true;
+      licenseOK      = true;
+      licenseChecked = true;
+      Comment("");
+
+      // 위험고지 팝업 (라이센스 확인 직후 1회만)
+      string riskMsg =
+         "EA 시작 전 필수 투자위험 및 책임 고지\n\n"
+         "본 EA는 자동매매 보조 프로그램이며 수익을 보장하지 않습니다\n\n"
+         "레버리지 상품은 시장 변동성 스프레드 확대 슬리피지 체결 지연 서버 장애 증거금 부족 마진콜 강제청산 등으로 인해 큰 손실이 발생할 수 있습니다\n\n"
+         "기본 설정값 안내값 백테스트 과거 운용 결과 예시 수익률 시뮬레이션 자료는 참고용 정보이며 미래 수익이나 손실 제한을 보장하지 않습니다\n\n"
+         "본 프로그램은 투자권유 투자자문 투자일임 대리매매 계좌운용을 목적으로 하지 않습니다\n\n"
+         "EA의 설치 설정 실행 중지 포지션 청산 운용 여부에 대한 최종 판단과 책임은 전적으로 이용자 본인에게 있습니다\n\n"
+         "본인의 투자 경험 재무상태 위험 감내 수준 계좌 상황을 충분히 고려한 뒤 사용 여부를 결정해야 합니다\n\n"
+         "위 내용을 이해했으며 본인 판단과 책임으로 EA를 실행합니다\n\n"
+         "동의하시면 예 버튼을 눌러 시작하세요";
+
+      int res = MessageBox(riskMsg, "골드런 EA", MB_YESNO|MB_ICONWARNING);
+      if(res != IDYES)
+      {
+         Comment("GOLDRUN EA: 위험고지 미동의. 거래가 중지됩니다.");
+         Print("GOLDRUN EA: 위험고지 미동의.");
+         riskAccepted = false;
+         return;
+      }
+      riskAccepted = true;
+      Print("GOLDRUN EA v9.1 시작 | Acc=",AccountNumber()," | ",licenseStatus);
+      return;
    }
 
+   // ── 라이센스/동의 안 됐으면 매매 중단
+   if(!licenseOK || !riskAccepted) return;
+
    ProcessTrading();
-   if(licenseOK && SendBalance && TimeCurrent()-마지막잔고전송 >= SendBalanceMinutes*60)
-   {
-      마지막잔고전송 = TimeCurrent();
-      SendBalanceToSupabase();
-   }
+   if(licenseOK && SendBalance) SendBalanceToSupabase();
 }
 //+------------------------------------------------------------------+

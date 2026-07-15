@@ -1,9 +1,9 @@
-//+------------------------------------------------------------------+
-//| Soluni_EA_TossUI.mq4                                           |
-//| Soluni Trading System                      |
-//| Soluni v1.0 — Simple Toss Style UI                    |
+﻿//+------------------------------------------------------------------+
+//| GOLD_PRIVATE_Official_UI.mq4                                           |
+//| DQL(Diplomat Quant Logic) by HERITAGE ASSET                      |
+//| GOLD PRIVATE v9.1 — Official UI + Final Stop Safety                    |
 //|                                                                  |
-//| 거래 로직: Eldorado_XAU_Clone_v1_6_Final_UI_Sync 완전 동일       |
+//| 거래 로직: GOLD_PRIVATE base logic (v1_6_Final) 완전 동일       |
 //| v1.6 핵심:                                                        |
 //|  - SellGridPoints = 300 (v1.3의 330에서 수정)                    |
 //|  - MaxStepsPerSide = 99 (원본 설정 복원)                          |
@@ -12,14 +12,14 @@
 //|  - TPMode 0=포인트 / 1=달러 선택 가능                             |
 //+------------------------------------------------------------------+
 #property strict
-#property copyright "Soluni Trading System"
-#property version   "1.00"
+#property copyright "made by gold_private"
+#property version   "9.10"
 
 //===================================================
 // [기본]
 //===================================================
 extern string SET_00                  = "======= EA 설정 =======";
-extern string EA_Name                 = "======= Soluni =======";
+extern string EA_Name                 = "======= GOLD PRIVATE =======";
 extern int    MagicNumber             = 123456;
 extern string SET_01                  = "--- [1] 거래 방향 ---";
 extern bool   AllowBuy                = true;
@@ -37,6 +37,12 @@ extern int    GridPoints              = 300;
 extern int    BuyGridPoints           = 300;      // 0이면 GridPoints 사용
 extern int    SellGridPoints          = 300;      // 0이면 GridPoints 사용
 extern int    MaxStepsPerSide         = 99;
+extern string SET_TREND               = "--- [추세장 방어 - 공격형: 극단 추세만 차단] ---";
+extern bool   UseTrendFilter          = true;     // 추세 필터 사용
+extern int    TrendADXPeriod          = 14;       // 추세 판단 ADX 기간
+extern double TrendADXLevel           = 55.0;     // 공격형: 55 (극단 폭주만 차단, 추세 수익 최대 보존)
+extern double TrendDIGap              = 12.0;     // DI+/DI- 격차 (방향 확신 매우 클 때만)
+extern bool   TrendBlockReverse       = true;     // 추세 반대방향 신규 마틴 추가 중단
 extern int    MinSecondsBetweenAdds   = 5;
 extern int    ReEntryDelaySeconds     = 0;
 extern string SET_05                  = "--- [5] 청산 모드 ---";
@@ -61,6 +67,7 @@ extern string SET_07                  = "--- [7] UI 설정 ---";
 extern int    DashboardCorner         = 1;        // 0=좌상단 1=우상단 2=좌하단 3=우하단
 extern int    DashboardX              = 14;       // 모서리에서 가로 여백(px)
 extern int    DashboardY              = 14;       // 모서리에서 세로 여백(px)
+extern int    DashboardFontBoost       = 2;        // 대시보드 글씨 확대값(기본 +2)
 extern bool   StopButtonCloseSide     = false;    // BUY/SELL STOP 클릭 시 해당 방향 포지션도 함께 청산
 extern int    MaxSpreadPoints         = 80;
 extern int    SlippagePoints          = 5;
@@ -73,9 +80,9 @@ extern bool   PrintDebug              = false;
 //===================================================
 // [8] AXION 라이선스 (변경 금지)
 //===================================================
-extern string _80_ = "=== [8] Soluni 라이선스 ===";
+extern string _80_ = "=== [8] AXION 라이선스 (변경금지) ===";
 extern string _81_ = "관리자페이지 등록 프로그램명과 일치해야 함";
-extern string 프로그램명             = "Soluni";
+extern string 프로그램명             = "GOLDRUN_EA";
 extern string _82_ = "서버 주소 (변경금지)";
 extern string 서버주소               = "https://wmvnearoursbmwjqwzww.supabase.co";
 extern string _83_ = "인증키 (변경금지)";
@@ -86,22 +93,26 @@ extern int    SendBalanceMinutes      = 5;
 //===================================================
 // 내부 변수
 //===================================================
-datetime g_lastBuyAdd        = 0;
-datetime g_lastSellAdd       = 0;
-datetime g_lastBuyClose      = 0;
-datetime g_lastSellClose     = 0;
-datetime g_dayStart          = 0;
-double   g_dayStartEq        = 0;
-double   g_sessionStartEq    = 0;
-bool     licenseOK           = false;
-string   licenseStatus       = "확인 중...";
-datetime 마지막라이센스체크  = 0;
+datetime g_lastBuyAdd    = 0;
+datetime g_lastSellAdd   = 0;
+datetime g_lastBuyClose  = 0;
+datetime g_lastSellClose = 0;
+datetime g_dayStart      = 0;
+double   g_dayStartEq    = 0;
+double   g_sessionStartEq= 0;
+bool     licenseOK       = false;
+bool     licenseChecked  = false;   // 라이센스 체크 완료 여부
+bool     riskAccepted    = false;   // 위험고지 동의 여부
+string   licenseStatus   = "확인 중...";
 bool     buyStopped      = false;
 bool     sellStopped     = false;
 bool     finalStopped    = false;
 string   finalReason     = "";
 datetime finalStopTime   = 0;
 int      totalCycles     = 0;
+double   g_todayPeakEq   = 0.0;   // 오늘 장중 최고 Equity
+double   g_todayMaxMDD   = 0.0;   // 오늘 최대 MDD 금액
+double   g_todayMaxMDDPct= 0.0;   // 오늘 최대 MDD 비율
 
 string PFX       = "GLD_";
 string BTN_BUY   = "GLD_BTN_BUY";
@@ -121,7 +132,7 @@ color CLR_DARK  = C'6,5,2';
 //+------------------------------------------------------------------+
 //| 유틸리티 — v1.6 완전 동일                                         |
 //+------------------------------------------------------------------+
-void Dbg(string s){ if(PrintDebug) Print("[Soluni] ",s); }
+void Dbg(string s){ if(PrintDebug) Print("[GOLD PRIVATE] ",s); }
 double Pt(){ return MarketInfo(Symbol(),MODE_POINT); }
 int    Dig(){ return (int)MarketInfo(Symbol(),MODE_DIGITS); }
 double NPrice(double p){ return NormalizeDouble(p,Dig()); }
@@ -255,7 +266,14 @@ bool SendMarketOrder(int type, double lots, string comment)
 void ResetDailyIfNeeded()
 {
    datetime d=iTime(Symbol(),PERIOD_D1,0);
-   if(d!=g_dayStart){ g_dayStart=d; g_dayStartEq=AccountEquity(); }
+   if(d!=g_dayStart)
+   {
+      g_dayStart      = d;
+      g_dayStartEq    = AccountEquity();
+      g_todayPeakEq   = AccountEquity();
+      g_todayMaxMDD   = 0.0;
+      g_todayMaxMDDPct= 0.0;
+   }
 }
 
 bool SpreadOK()
@@ -290,6 +308,28 @@ double SessionPnL()
    return(AccountEquity()-g_sessionStartEq);
 }
 
+void UpdateTodayMDD()
+{
+   double eq = AccountEquity();
+   if(g_todayPeakEq <= 0.0) g_todayPeakEq = eq;
+
+   if(eq > g_todayPeakEq)
+      g_todayPeakEq = eq;
+
+   double dd = g_todayPeakEq - eq;
+   if(dd > g_todayMaxMDD)
+   {
+      g_todayMaxMDD = dd;
+      g_todayMaxMDDPct = (g_todayPeakEq > 0.0) ? (dd / g_todayPeakEq * 100.0) : 0.0;
+   }
+}
+
+string MDDStr()
+{
+   if(g_todayMaxMDD <= 0.0) return "$0.00 (0.00%)";
+   return "-$" + DoubleToString(g_todayMaxMDD,2) + " (" + DoubleToString(g_todayMaxMDDPct,2) + "%)";
+}
+
 void TriggerFinalStop(string reason)
 {
    if(finalStopped) return;
@@ -299,8 +339,8 @@ void TriggerFinalStop(string reason)
    if(CloseAllOnFinalStop){ CloseSide(OP_BUY); CloseSide(OP_SELL); }
    if(StopEAAfterFinal){ buyStopped=true; sellStopped=true; }
    if(AlertOnFinalStop)
-      Alert("Soluni STOP: ",reason," / Session P&L=",DoubleToString(SessionPnL(),2));
-   Print("Soluni FINAL STOP: ",reason,
+      Alert("GOLD PRIVATE STOP: ",reason," / Session P&L=",DoubleToString(SessionPnL(),2));
+   Print("GOLD PRIVATE FINAL STOP: ",reason,
          " SessionPnL=",DoubleToString(SessionPnL(),2));
    if(RemoveEAOnFinalStop) ExpertRemove();
 }
@@ -324,6 +364,32 @@ bool CheckFinalStop()
 //+------------------------------------------------------------------+
 //| 거래 로직 — v1.6 완전 동일                                        |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| 추세장 방어 — 극단 추세 시 역방향 마틴 차단 (공격형 C안)          |
+//+------------------------------------------------------------------+
+// 추세 방향: 1=상승추세, -1=하락추세, 0=추세없음(횡보)
+int TrendDirection()
+{
+   if(!UseTrendFilter) return 0;
+   double adx = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_MAIN,0);
+   double diP = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_PLUSDI,0);
+   double diM = iADX(Symbol(),PERIOD_CURRENT,TrendADXPeriod,PRICE_CLOSE,MODE_MINUSDI,0);
+   if(adx < TrendADXLevel) return 0;                  // 추세 약함 → 양방향 정상
+   if(diP > diM + TrendDIGap) return 1;               // 상승 추세
+   if(diM > diP + TrendDIGap) return -1;              // 하락 추세
+   return 0;
+}
+
+// 해당 방향 신규 마틴이 추세 필터에 막히는지
+bool ReverseMartinBlocked(int type)
+{
+   if(!UseTrendFilter || !TrendBlockReverse) return false;
+   int dir = TrendDirection();
+   if(dir == 1  && type == OP_SELL) return true;      // 상승추세 → 매도 마틴 차단
+   if(dir == -1 && type == OP_BUY)  return true;      // 하락추세 → 매수 마틴 차단
+   return false;
+}
+
 void ManageBuy()
 {
    if(finalStopped) return;
@@ -338,6 +404,7 @@ void ManageBuy()
    SyncBasketTP(OP_BUY);
    if(count>=MaxStepsPerSide) return;
    if(g_lastBuyAdd>0&&(TimeCurrent()-g_lastBuyAdd)<MinSecondsBetweenAdds) return;
+   if(ReverseMartinBlocked(OP_BUY)) return;   // [추세 방어] 하락 추세 시 매수 마틴 중단
    double lastPrice=LastOpenPriceSide(OP_BUY); if(lastPrice<=0) return;
    double buyCheckPrice=BuyGridUseAsk?Ask:Bid;
    int    buyGrid=(BuyGridPoints>0?BuyGridPoints:GridPoints);
@@ -360,6 +427,7 @@ void ManageSell()
    SyncBasketTP(OP_SELL);
    if(count>=MaxStepsPerSide) return;
    if(g_lastSellAdd>0&&(TimeCurrent()-g_lastSellAdd)<MinSecondsBetweenAdds) return;
+   if(ReverseMartinBlocked(OP_SELL)) return;   // [추세 방어] 상승 추세 시 매도 마틴 중단
    double lastPrice=LastOpenPriceSide(OP_SELL); if(lastPrice<=0) return;
    double sellCheckPrice=SellGridUseAsk?Ask:Bid;
    int    sellGrid=(SellGridPoints>0?SellGridPoints:GridPoints);
@@ -402,10 +470,9 @@ void RiskChecks()
 
 void ProcessTrading()
 {
-   if(!licenseOK) return;
-
    RefreshRates();
    ResetDailyIfNeeded();
+   UpdateTodayMDD();
    DrawDashboard();
 
    // 목표수익/최종손절 도달 후에는 신규 진입 금지
@@ -437,50 +504,21 @@ void ProcessTrading()
 //+------------------------------------------------------------------+
 bool CheckLicense()
 {
-   string _acc = IntegerToString((int)AccountNumber());
-   string _rh  = "apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
-   char _p[]; char _r[]; string _rhs;
-
-   // ── 1단계: 계좌 활성 여부 + 만료일 + customer id ──
-   string _url1 = 서버주소+"/rest/v1/customers"
-                + "?account_no=eq."+_acc
-                + "&is_active=eq.true"
-                + "&select=id,expires_at";
-   int _http1 = WebRequest("GET",_url1,_rh,8000,_p,_r,_rhs);
-   string _body1 = CharArrayToString(_r);
-   Print("Soluni License step1 HTTP=",_http1," body=",_body1);
-
-   if(_http1!=200||_body1=="[]"||StringFind(_body1,"expires_at")<0)
-   { licenseStatus="미등록 계좌 또는 라이선스 정지 (HTTP="+IntegerToString(_http1)+")"; return false; }
-
-   // 만료일 파싱
-   int    _ps  = StringFind(_body1,"\"expires_at\":\"")+14;
-   string _exp = StringSubstr(_body1,_ps,10);
-   StringReplace(_exp,"-",".");
+   string _acc=IntegerToString((int)AccountNumber());
+   string _pg=프로그램명;
+   StringReplace(_pg," ","%20"); StringReplace(_pg,"(","%28"); StringReplace(_pg,")","%29");
+   string _url=서버주소+"/rest/v1/customers?account_no=eq."+_acc+"&program_name=eq."+_pg+"&is_active=eq.true&select=expires_at";
+   string _rh="apikey: "+인증키+"\r\nAuthorization: Bearer "+인증키;
+   char _p[];char _r[];string _rhs;
+   int _http=WebRequest("GET",_url,_rh,8000,_p,_r,_rhs);
+   string _body=CharArrayToString(_r);
+   Print("GOLD PRIVATE License HTTP=",_http," body=",_body);
+   if(_http!=200||_body=="[]"||StringFind(_body,"expires_at")<0)
+   { licenseStatus="미등록 계좌 (HTTP="+IntegerToString(_http)+")"; return false; }
+   int _s=StringFind(_body,"\"expires_at\":\"")+14;
+   string _exp=StringSubstr(_body,_s,10); StringReplace(_exp,"-",".");
    if(_exp<TimeToString(TimeCurrent(),TIME_DATE))
    { licenseStatus="만료됨 ("+_exp+")"; return false; }
-
-   // customer id 파싱
-   int    _si     = StringFind(_body1,"\"id\":\"")+6;
-   int    _ei     = StringFind(_body1,"\"",_si);
-   string _custId = StringSubstr(_body1,_si,_ei-_si);
-
-   // ── 2단계: customer_programs 에서 EA 권한 확인 ──
-   char _r2[]; string _rhs2;
-   string _url2 = 서버주소+"/rest/v1/customer_programs"
-                + "?customer_id=eq."+_custId
-                + "&select=programs(name)";
-   int _http2 = WebRequest("GET",_url2,_rh,8000,_p,_r2,_rhs2);
-   string _body2  = CharArrayToString(_r2);
-   string _body2L = _body2;
-   string _progL  = 프로그램명;
-   StringToLower(_body2L);
-   StringToLower(_progL);
-   Print("Soluni License step2 HTTP=",_http2," body=",_body2);
-
-   if(_http2!=200||StringFind(_body2L,_progL)<0)
-   { licenseStatus="이 EA 권한 없음 ("+프로그램명+") - 관리자 페이지에서 권한 신청 필요"; return false; }
-
    licenseStatus="정상 ("+_exp+"까지)";
    return true;
 }
@@ -507,8 +545,8 @@ void SendBalanceToSupabase()
 // 좌측 코너일 때: XDISTANCE = 가로여백 + px
 // 상단 코너일 때: YDISTANCE = 세로여백 + py
 // 하단 코너일 때: YDISTANCE = (세로여백+패널높이) - py
-int PW = 286;
-int PH = 430;   // Soluni Toss-style compact UI
+int PW = 300;
+int PH = 352;   // GOLD PRIVATE 미니멀 레이아웃
 
 int GetCorner() { return DashboardCorner; }
 
@@ -526,6 +564,14 @@ int CY(int py)
    return DashboardY + py;
 }
 
+// 버튼 X 좌표 (idx: 0=왼쪽 1=가운데 2=오른쪽). 좌/우 코너 모두 균등 정렬
+int BtnX(int idx, int bw, int gap, int margin)
+{
+   // 카드(R함수)와 동일한 CX 좌표계 사용 → 패널 안에 정확히 정렬
+   int leftPx = margin + idx*(bw+gap);     // 패널 좌측 기준 버튼 왼쪽 X
+   return CX(leftPx);                       // CX가 코너에 맞게 자동 변환
+}
+
 void L(string id, string txt, int px, int py, int sz, color clr, string font="Arial Bold")
 {
    string n = PFX + id;
@@ -539,7 +585,9 @@ void L(string id, string txt, int px, int py, int sz, color clr, string font="Ar
    ObjectSetString (0,n,OBJPROP_TEXT,      txt);
    ObjectSetInteger(0,n,OBJPROP_XDISTANCE, CX(px));
    ObjectSetInteger(0,n,OBJPROP_YDISTANCE, CY(py));
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,  sz);
+   int finalSize = sz + DashboardFontBoost;
+   if(finalSize < 6) finalSize = 6;
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,  finalSize);
    ObjectSetInteger(0,n,OBJPROP_COLOR,     clr);
    ObjectSetString (0,n,OBJPROP_FONT,      font);
    ObjectSetInteger(0,n,OBJPROP_ZORDER,    1);   // 라벨: 배경 위
@@ -552,7 +600,7 @@ void R(string id, int px, int py, int w, int h, color bg, color border)
    {
       ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
       ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,n,OBJPROP_BACK,      true);
+      ObjectSetInteger(0,n,OBJPROP_BACK,      false);  // 불투명 → 다크 패널/골드 프레임 항상 표시
    }
    ObjectSetInteger(0,n,OBJPROP_CORNER,    GetCorner());
    ObjectSetInteger(0,n,OBJPROP_XDISTANCE, CX(px));
@@ -562,13 +610,72 @@ void R(string id, int px, int py, int w, int h, color bg, color border)
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,   bg);
    ObjectSetInteger(0,n,OBJPROP_COLOR,     border);
    ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT);
-   ObjectSetInteger(0,n,OBJPROP_ZORDER,0);   // 배경: ZORDER 최하위
+   ObjectSetInteger(0,n,OBJPROP_ZORDER,0);   // 배경/프레임: 텍스트보다 아래
+}
+
+// 초대장식 플로리시 구분선 (좌선—◆—우선)
+void Flourish(string id, int py, color lineClr, color diaClr)
+{
+   int cx = PW/2;
+   R(id+"L", 34,     py, (cx-34)-10, 1, lineClr, lineClr);
+   R(id+"R", cx+10,  py, (PW-34)-(cx+10), 1, lineClr, lineClr);
+   LC(id+"D", "◆", cx, py, 6, diaClr, "Arial");
 }
 
 // 구분선
 void HR(string id, int py, color clr)
 {
    R(id, 0, py, PW+2, 1, clr, clr);
+}
+
+// 중앙정렬 라벨 (cx_px = 패널 좌측 기준 중심 X)
+void LC(string id, string txt, int cx_px, int py, int sz, color clr, string font="Arial Bold")
+{
+   string n = PFX + id;
+   if(ObjectFind(0,n)<0)
+   {
+      ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,n,OBJPROP_BACK,      false);
+   }
+   ObjectSetInteger(0,n,OBJPROP_CORNER,    GetCorner());
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,    ANCHOR_CENTER);
+   ObjectSetString (0,n,OBJPROP_TEXT,      txt);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE, CX(cx_px));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE, CY(py));
+   int finalSize = sz + DashboardFontBoost;
+   if(finalSize < 6) finalSize = 6;
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,  finalSize);
+   ObjectSetInteger(0,n,OBJPROP_COLOR,     clr);
+   ObjectSetString (0,n,OBJPROP_FONT,      font);
+   ObjectSetInteger(0,n,OBJPROP_ZORDER,    1);
+}
+
+// 콤마 + 소수 2자리 ($2,068.15 형태)
+string FmtMoney2(double v)
+{
+   bool neg = v<0; v=MathAbs(v);
+   string ip = DoubleToString(MathFloor(v),0);
+   int len=StringLen(ip); string out="";
+   for(int i=0;i<len;i++){ if(i>0 && (len-i)%3==0) out+=","; out+=StringSubstr(ip,i,1); }
+   int cents=(int)MathRound((v-MathFloor(v))*100.0);
+   string cs=IntegerToString(cents); if(StringLen(cs)<2) cs="0"+cs;
+   return (neg?"-":"")+out+"."+cs;
+}
+
+
+// 천단위 콤마 포맷 ($410,369 형태)
+string FmtK(double v)
+{
+   string s = DoubleToString(MathAbs(v), 0);
+   int len = StringLen(s);
+   string out = "";
+   for(int i=0; i<len; i++)
+   {
+      if(i>0 && (len-i)%3==0) out += ",";
+      out += StringSubstr(s, i, 1);
+   }
+   return (v<0?"-":"") + out;
 }
 
 string MoneyStr(double v)
@@ -580,23 +687,23 @@ color MoneyClr(double v) { return v>=0 ? CLR_GREEN : CLR_RED; }
 //--- 버튼 생성 (OnInit에서 한 번만 호출)
 void CreateButtons()
 {
-   int bw = 90;   // 버튼 너비
-   int bh = 30;   // 버튼 높이
-   int gap = 6;   // 버튼 간격
+   int M2  = 14;   // 카드와 동일한 좌우 여백
+   int gap = 6;    // 버튼 간격
+   int bw  = (PW - M2*2 - gap*2) / 3;  // 카드 폭에 맞춘 버튼 너비
+   int bh  = 34;   // 버튼 높이
 
-   // 버튼 Y 위치: 패널 하단
-   int btnY = CY(PH - 39);  // 패널 하단
-   bool rightSide = (DashboardCorner==1 || DashboardCorner==3);
+   // 버튼 Y 위치: 패널 하단 (미니멀 레이아웃)
+   int btnY = CY(PH - 40);
 
    // SELL STOP (왼쪽)
    if(ObjectFind(0,BTN_SELL)<0) ObjectCreate(0,BTN_SELL,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_SELL,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw*3 + gap*2 : DashboardX);
+   ObjectSetInteger(0,BTN_SELL,OBJPROP_XDISTANCE, BtnX(0, bw, gap, M2));
    ObjectSetInteger(0,BTN_SELL,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_YSIZE,     bh);
-   ObjectSetString (0,BTN_SELL,OBJPROP_FONT,      "Arial Bold");
-   ObjectSetInteger(0,BTN_SELL,OBJPROP_FONTSIZE,  9);
+   ObjectSetString (0,BTN_SELL,OBJPROP_FONT,      "Segoe UI Semibold");
+   ObjectSetInteger(0,BTN_SELL,OBJPROP_FONTSIZE,  11);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_COLOR,     clrWhite);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_STATE,     false);
    ObjectSetInteger(0,BTN_SELL,OBJPROP_ZORDER,    100);
@@ -605,12 +712,12 @@ void CreateButtons()
    // BUY STOP (가운데)
    if(ObjectFind(0,BTN_BUY)<0) ObjectCreate(0,BTN_BUY,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_BUY,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw*2 + gap : DashboardX + bw + gap);
+   ObjectSetInteger(0,BTN_BUY,OBJPROP_XDISTANCE, BtnX(1, bw, gap, M2));
    ObjectSetInteger(0,BTN_BUY,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_YSIZE,     bh);
-   ObjectSetString (0,BTN_BUY,OBJPROP_FONT,      "Arial Bold");
-   ObjectSetInteger(0,BTN_BUY,OBJPROP_FONTSIZE,  9);
+   ObjectSetString (0,BTN_BUY,OBJPROP_FONT,      "Segoe UI Semibold");
+   ObjectSetInteger(0,BTN_BUY,OBJPROP_FONTSIZE,  11);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_COLOR,     clrWhite);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_STATE,     false);
    ObjectSetInteger(0,BTN_BUY,OBJPROP_ZORDER,    100);
@@ -619,12 +726,12 @@ void CreateButtons()
    // CLOSE ALL (오른쪽)
    if(ObjectFind(0,BTN_CLOSE)<0) ObjectCreate(0,BTN_CLOSE,OBJ_BUTTON,0,0,0);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_CORNER,    GetCorner());
-   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XDISTANCE, rightSide ? DashboardX + bw + gap : DashboardX + (bw+gap)*2);
+   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XDISTANCE, BtnX(2, bw, gap, M2));
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_YDISTANCE, btnY);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_XSIZE,     bw);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_YSIZE,     bh);
-   ObjectSetString (0,BTN_CLOSE,OBJPROP_FONT,      "Arial Bold");
-   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_FONTSIZE,  9);
+   ObjectSetString (0,BTN_CLOSE,OBJPROP_FONT,      "Segoe UI Semibold");
+   ObjectSetInteger(0,BTN_CLOSE,OBJPROP_FONTSIZE,  11);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_COLOR,     clrWhite);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_STATE,     false);
    ObjectSetInteger(0,BTN_CLOSE,OBJPROP_ZORDER,    100);
@@ -636,29 +743,33 @@ void CreateButtons()
 
 void RefreshButtonLabels()
 {
-   // SELL STOP 버튼
+   // SELL STOP (딥 레드)
    if(ObjectFind(0,BTN_SELL)>=0)
    {
       string t  = finalStopped ? "STOPPED" : (sellStopped ? "SELL  ON" : "SELL STOP");
-      color  bg = finalStopped ? C'50,10,10' : (sellStopped ? C'20,110,45' : C'170,35,35');
-      ObjectSetString (0,BTN_SELL,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'40,20,22' : (sellStopped ? C'40,62,44' : C'122,21,24');
+      ObjectSetString (0,BTN_SELL,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_SELL,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_SELL,OBJPROP_COLOR,   C'243,217,201');
    }
-   // BUY STOP 버튼
+   // BUY STOP (다크 + 골드 글씨)
    if(ObjectFind(0,BTN_BUY)>=0)
    {
       string t  = finalStopped ? "STOPPED" : (buyStopped ? "BUY   ON" : "BUY  STOP");
-      color  bg = finalStopped ? C'50,10,10' : (buyStopped ? C'20,110,45' : C'25,75,180');
-      ObjectSetString (0,BTN_BUY,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'40,20,22' : (buyStopped ? C'40,62,44' : C'20,18,16');
+      color  fg = (finalStopped||buyStopped) ? C'243,217,201' : C'217,180,90';
+      ObjectSetString (0,BTN_BUY,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_BUY,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_BUY,OBJPROP_COLOR,   fg);
    }
-   // CLOSE ALL 버튼
+   // CLOSE ALL (다크 루비)
    if(ObjectFind(0,BTN_CLOSE)>=0)
    {
       string t  = finalStopped ? "CLOSED" : "CLOSE ALL";
-      color  bg = finalStopped ? C'40,40,40' : C'120,25,25';
-      ObjectSetString (0,BTN_CLOSE,OBJPROP_TEXT,   t);
+      color  bg = finalStopped ? C'40,18,18' : C'74,15,16';
+      ObjectSetString (0,BTN_CLOSE,OBJPROP_TEXT,    t);
       ObjectSetInteger(0,BTN_CLOSE,OBJPROP_BGCOLOR, bg);
+      ObjectSetInteger(0,BTN_CLOSE,OBJPROP_COLOR,   C'232,201,176');
    }
    ChartRedraw(0);
 }
@@ -673,7 +784,7 @@ void PollButtons()
       if(!finalStopped)
       {
          sellStopped = !sellStopped;
-         Print("Soluni: SELL ", sellStopped?"STOPPED":"RESUMED");
+         Print("GOLD PRIVATE: SELL ", sellStopped?"STOPPED":"RESUMED");
       }
       RefreshButtonLabels();
    }
@@ -684,7 +795,7 @@ void PollButtons()
       if(!finalStopped)
       {
          buyStopped = !buyStopped;
-         Print("Soluni: BUY ", buyStopped?"STOPPED":"RESUMED");
+         Print("GOLD PRIVATE: BUY ", buyStopped?"STOPPED":"RESUMED");
       }
       RefreshButtonLabels();
    }
@@ -694,7 +805,7 @@ void PollButtons()
       ObjectSetInteger(0,BTN_CLOSE,OBJPROP_STATE,false);
       if(!finalStopped)
       {
-         Print("Soluni: CLOSE ALL 실행");
+         Print("GOLD PRIVATE: CLOSE ALL 실행");
          CloseSide(OP_BUY);
          CloseSide(OP_SELL);
          buyStopped   = true;
@@ -702,7 +813,7 @@ void PollButtons()
          finalStopped = true;
          finalReason  = "MANUAL CLOSE ALL";
          finalStopTime= TimeCurrent();
-         if(AlertOnFinalStop) Alert("Soluni: 전체 청산 완료. 신규 진입 중단.");
+         if(AlertOnFinalStop) Alert("GOLD PRIVATE: 전체 청산 완료. 신규 진입 중단.");
       }
       RefreshButtonLabels();
    }
@@ -732,122 +843,93 @@ void OnChartEvent(const int id,const long &lp,const double &dp,const string &sp)
 void DrawDashboard()
 {
    if(!ShowDashboard){ Comment(""); return; }
+   UpdateTodayMDD();
 
-   // Soluni UI는 핵심만 표시합니다.
-   // MDD/ADX 등 복잡한 장세 지표는 표시하지 않지만, 매매 로직은 그대로 유지됩니다.
-   Comment("");
-
+   // ─── 데이터 수집 ───────────────────────────────────
    double equity  = AccountEquity();
    double balance = AccountBalance();
    double dayPnL  = equity - g_dayStartEq;
-   double sessPnL = equity - g_sessionStartEq;
-   double spread  = MarketInfo(Symbol(),MODE_SPREAD);
+   double dayPct  = balance>0 ? dayPnL/balance*100.0 : 0;
 
-   int    bc   = CountSide(OP_BUY);
-   int    sc   = CountSide(OP_SELL);
-   double bl   = TotalLotsSide(OP_BUY);
-   double sl   = TotalLotsSide(OP_SELL);
-   double bAvg = WeightedAvgSide(OP_BUY);
-   double sAvg = WeightedAvgSide(OP_SELL);
-   double bTP  = BasketTPPrice(OP_BUY);
-   double sTP  = BasketTPPrice(OP_SELL);
-   double bFL  = BasketProfitSide(OP_BUY);
-   double sFL  = BasketProfitSide(OP_SELL);
-   double tFL  = bFL + sFL;
+   int    bc = CountSide(OP_BUY);
+   int    sc = CountSide(OP_SELL);
+   double bFL = BasketProfitSide(OP_BUY);
+   double sFL = BasketProfitSide(OP_SELL);
+   double tFL = bFL + sFL;                       // 현재 플로팅 손익
+   double curPct = balance>0 ? tFL/balance*100.0 : 0;
 
-   string ft = FinalTakeProfitDollars>0 ? "$"+DoubleToString(FinalTakeProfitDollars,0) : "OFF";
-   string fs = FinalStopLossDollars>0   ? "$"+DoubleToString(FinalStopLossDollars,0)   : "OFF";
+   // ─── VIP 팔레트 ───────────────────────────────────
+   color DARK   = C'11,9,10';
+   color GOLD   = C'217,180,90';
+   color GOLDL  = C'138,111,46';
+   color REDBAR = C'139,20,22';
+   color REDLN  = C'74,32,32';
+   color REDDIA = C'138,53,53';
+   color CREAM  = C'243,236,218';
+   color LBL    = C'154,143,116';
+   color GRN    = C'111,191,134';
+   color REDV   = C'224,115,106';
 
-   string stTxt = "Running";
-   color  stClr = C'0,178,90';
-   if(!licenseOK)                   { stTxt="No License";  stClr=C'239,68,68';  }
-   else if(finalStopped)            { stTxt=finalReason;   stClr=C'239,68,68';  }
-   else if(buyStopped&&sellStopped) { stTxt="All Stopped"; stClr=C'107,114,128';}
-   else if(buyStopped)              { stTxt="Buy Stopped"; stClr=C'107,114,128';}
-   else if(sellStopped)             { stTxt="Sell Stopped";stClr=C'107,114,128';}
+   string F  = "Segoe UI";
+   string FB = "Segoe UI Semibold";
 
-   // Toss-style palette
-   color BG      = C'246,248,252';
-   color CARD    = C'255,255,255';
-   color LINE    = C'229,234,242';
-   color TEXT    = C'25,31,40';
-   color SUB     = C'107,114,128';
-   color BLUE    = C'49,130,246';
-   color BLUE2   = C'232,241,255';
-   color GREEN   = C'0,178,90';
-   color RED     = C'239,68,68';
-   color AMBER   = C'245,158,11';
+   int CXc = PW/2;
+   int CL  = (int)(PW*0.34);
+   int CR  = (int)(PW*0.66);
 
-   int y = 0;
+   // ── 다크 패널 + 골드 프레임 + 안쪽 레드 프레임 + 상단 레드바 ──
+   R("panel",  0, 0, PW,   PH-40, DARK,   GOLD);
+   R("inset",  3, 3, PW-6, PH-46, DARK,   REDLN);
+   R("accent", 0, 0, PW,   3,     REDBAR, REDBAR);
 
-   // Main background
-   R("bg", 0, y, PW+2, PH, BG, LINE);
+   // ── [1] 타이틀 ──
+   LC("T1","Private", CXc, 26, 16, GOLD, FB);
+   Flourish("fl0", 46, GOLDL, GOLD);
 
-   // Header
-   R("hd", 0, y, PW+2, 72, CARD, LINE);
-   L("T1","Soluni", 22, y+14, 22, BLUE, "Arial Bold");
-   L("T2","Gold Auto Trading", 24, y+43, 9, SUB, "Arial");
-   L("T3",licenseOK ? "License OK" : "License NO", 260, y+18, 8, licenseOK?GREEN:RED, "Arial Bold");
-   L("T4","v1.0", 312, y+43, 8, SUB, "Arial");
-   y += 78;
+   // ── [2] BALANCE ──
+   LC("BLBL","BALANCE", CXc, 62, 7, LBL, F);
+   LC("BVAL","$"+FmtMoney2(balance), CXc, 81, 15, CREAM, FB);
+   string sub = (dayPnL>=0?"+$":"-$")+DoubleToString(MathAbs(dayPnL),2)
+              + "   ·   " + (dayPct>=0?"+":"")+DoubleToString(dayPct,2)+"%"
+              + "   ·   Monthly";
+   LC("BSUB", sub, CXc, 101, 7, LBL, F);
 
-   // Symbol row
-   R("sym", 14, y, PW-28, 38, CARD, LINE);
-   L("SY", Symbol(), 28, y+9, 11, TEXT, "Arial Bold");
-   L("TI", TimeToString(TimeCurrent(),TIME_SECONDS), 134, y+10, 10, SUB, "Arial");
-   L("SP", "Spread "+DoubleToString(spread,0), 242, y+10, 9, spread>60?RED:SUB, "Arial");
-   y += 48;
+   Flourish("fl1", 120, REDLN, REDDIA);
 
-   // Account summary card
-   R("acc", 14, y, PW-28, 88, CARD, LINE);
-   L("AH", "Account", 28, y+12, 9, SUB, "Arial Bold");
-   L("AB1","Balance", 28, y+34, 8, SUB, "Arial");
-   L("AB2","$"+DoubleToString(balance,0), 28, y+51, 13, TEXT, "Arial Bold");
+   // ── [3] CURRENT PnL ──
+   LC("CPV", (curPct>=0?"+":"")+DoubleToString(curPct,1)+"%", CXc, 143, 19,
+      tFL>=0 ? CREAM : REDV, FB);
+   LC("CPL","CURRENT PnL", CXc, 168, 7, LBL, F);
 
-   L("AE1","Equity", 132, y+34, 8, SUB, "Arial");
-   L("AE2","$"+DoubleToString(equity,0), 132, y+51, 13, equity>=balance?GREEN:RED, "Arial Bold");
+   Flourish("fl2", 186, REDLN, REDDIA);
 
-   L("AP1","Live P&L", 238, y+34, 8, SUB, "Arial");
-   L("AP2",MoneyStr(dayPnL), 238, y+51, 13, MoneyClr(dayPnL), "Arial Bold");
-   y += 100;
+   // ── [4] ORDERS ──
+   LC("OBV", IntegerToString(bc), CL, 206, 13, GOLD, FB);
+   LC("OBL","BUY",  CL, 226, 7, LBL, F);
+   LC("OSEP","|",   CXc, 210, 12, REDLN, F);
+   LC("OSV", IntegerToString(sc), CR, 206, 13, REDV, FB);
+   LC("OSL","SELL", CR, 226, 7, LBL, F);
+   LC("OLBL","ORDERS", CXc, 244, 7, LBL, F);
 
-   // Position summary card
-   R("pos", 14, y, PW-28, 126, CARD, LINE);
-   L("PH", "Positions", 28, y+12, 9, SUB, "Arial Bold");
+   Flourish("fl3", 262, REDLN, REDDIA);
 
-   // BUY
-   R("buyTag", 28, y+34, 58, 20, BLUE2, BLUE2);
-   L("BT", "BUY", 43, y+37, 8, BLUE, "Arial Bold");
-   L("BO", "Orders  "+IntegerToString(bc), 28, y+64, 8, SUB, "Arial");
-   L("BL", "Lots    "+DoubleToString(bl,2), 28, y+82, 8, SUB, "Arial");
-   L("BF", MoneyStr(bFL), 28, y+100, 10, MoneyClr(bFL), "Arial Bold");
+   // ── [5] 상태 ──
+   datetime lastAdd = (g_lastBuyAdd>g_lastSellAdd)?g_lastBuyAdd:g_lastSellAdd;
+   bool cooling = (MinSecondsBetweenAdds>0 && lastAdd>0
+                   && (TimeCurrent()-lastAdd) < MinSecondsBetweenAdds);
+   string w1 = cooling ? "COOLING" : "ACTIVE";
+   color  c1 = cooling ? GOLD : GRN;
 
-   // SELL
-   R("sellTag", 198, y+34, 58, 20, C'255,235,238', C'255,235,238');
-   L("STG", "SELL", 213, y+37, 8, RED, "Arial Bold");
-   L("SO", "Orders  "+IntegerToString(sc), 198, y+64, 8, SUB, "Arial");
-   L("SLT", "Lots    "+DoubleToString(sl,2), 198, y+82, 8, SUB, "Arial");
-   L("SF", MoneyStr(sFL), 198, y+100, 10, MoneyClr(sFL), "Arial Bold");
-   y += 138;
+   string w2; color c2;
+   if(!licenseOK)             { w2="NO LICENSE"; c2=REDV; }
+   else if(finalStopped)      { w2="STOPPED";    c2=REDV; }
+   else if(!riskAccepted)     { w2="WAIT";       c2=LBL;  }
+   else                       { w2="READY";      c2=GRN;  }
 
-   // Trade info row
-   R("info", 14, y, PW-28, 58, CARD, LINE);
-   L("IH", "Basket", 28, y+10, 8, SUB, "Arial Bold");
-   L("IA", "Avg  " + (bAvg>0?DoubleToString(bAvg,Dig()):"-") + " / " + (sAvg>0?DoubleToString(sAvg,Dig()):"-"), 28, y+29, 8, SUB, "Arial");
-   L("IT", "TP   " + (bTP>0?DoubleToString(bTP,Dig()):"-") + " / " + (sTP>0?DoubleToString(sTP,Dig()):"-"), 180, y+29, 8, SUB, "Arial");
-   y += 70;
+   LC("ST1", w1, (int)(PW*0.30), 282, 9, c1, FB);
+   LC("ST2", w2, (int)(PW*0.70), 282, 9, c2, FB);
 
-   // Status row
-   R("stat", 14, y, PW-28, 48, CARD, LINE);
-   L("RUN", stTxt, 28, y+10, 11, stClr, "Arial Bold");
-   L("FL", "Float " + MoneyStr(tFL), 138, y+11, 10, MoneyClr(tFL), "Arial Bold");
-   L("FS", "TP " + ft + " / SL " + fs, 28, y+30, 8, SUB, "Arial");
-   L("SS", "Session " + MoneyStr(sessPnL), 190, y+30, 8, MoneyClr(sessPnL), "Arial");
-   y += 58;
-
-   // Button area background
-   R("bb", 14, y, PW-28, 46, CARD, LINE);
-
+   // ── 버튼 ──
    RefreshButtonLabels();
    ChartRedraw(0);
 }
@@ -856,32 +938,64 @@ void DrawDashboard()
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   licenseOK=false; licenseStatus="확인 중...";
+   licenseOK      = false;
+   licenseChecked = false;
+   riskAccepted   = false;
    buyStopped=false; sellStopped=false;
    finalStopped=false; finalReason=""; finalStopTime=0; totalCycles=0;
-   DeleteAllObjects();
-   Comment("Soluni: 라이선스 확인 중...");
-   Sleep(300);
 
-   if(!CheckLicense())
-   { Comment("Soluni: "+licenseStatus); return(INIT_FAILED); }
-
-   licenseOK      = true;
-   g_dayStart     = iTime(Symbol(),PERIOD_D1,0);
-   g_dayStartEq   = AccountEquity();
+   g_dayStart      = iTime(Symbol(),PERIOD_D1,0);
+   g_dayStartEq    = AccountEquity();
    g_sessionStartEq= AccountEquity();
+   g_todayPeakEq   = AccountEquity();
+   g_todayMaxMDD   = 0.0;
+   g_todayMaxMDDPct= 0.0;
 
-   CreateButtons();   // 버튼은 여기서 딱 한 번만 생성
-   EventSetTimer(1);
-   Print("Soluni v1.0 OK | Acc=",AccountNumber()," | ",licenseStatus);
+   CreateButtons();
+   EventSetTimer(1);   // 1초 타이머 → OnTimer에서 라이센스 체크
+   Comment("GOLD PRIVATE: 잠시 후 라이센스 확인...");
+   Print("GOLD PRIVATE v9.1 초기화 | Acc=",AccountNumber());
    return(INIT_SUCCEEDED);
 }
 
 void OnDeinit(const int reason){ EventKillTimer(); DeleteAllObjects(); Comment(""); }
 
+
+//+------------------------------------------------------------------+
+//| 잔고 $50 이하 → 전체 청산 후 EA 즉시 종료                          |
+//+------------------------------------------------------------------+
+bool g_balanceHalt = false;
+void CheckBalanceStop()
+{
+   if(g_balanceHalt) return;
+   if(AccountBalance() <= 50.0)
+   {
+      g_balanceHalt = true;
+      // 보유 포지션 전체 청산
+      for(int i = OrdersTotal()-1; i >= 0; i--)
+      {
+         if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         {
+            if(OrderType()==OP_BUY)
+               OrderClose(OrderTicket(), OrderLots(), Bid, 50, clrRed);
+            else if(OrderType()==OP_SELL)
+               OrderClose(OrderTicket(), OrderLots(), Ask, 50, clrRed);
+            else
+               OrderDelete(OrderTicket());
+         }
+      }
+      Print(">>> 잔고 $50 이하 도달 - EA 종료");
+      Comment("잔고 $50 이하 - EA 종료됨");
+      ExpertRemove();   // EA를 차트에서 즉시 제거 (서버 부하 제거)
+   }
+}
+
 void OnTick()
 {
-   PollButtons();       // 버튼 폴링 먼저
+   CheckBalanceStop();   if(g_balanceHalt) return;
+
+   PollButtons();
+   if(!licenseChecked || !riskAccepted) return;  // 라이센스/동의 전엔 거래 안 함
    ProcessTrading();
 }
 
@@ -889,24 +1003,47 @@ void OnTimer()
 {
    PollButtons();
 
-   // 1시간마다 라이선스 재확인 (정지/만료 감지)
-   if(TimeCurrent()-마지막라이센스체크 >= 3600)
+   // ── 라이센스 + 위험고지: 아직 안 됐으면 여기서 처리
+   if(!licenseChecked)
    {
-      마지막라이센스체크 = TimeCurrent();
+      Comment("GOLD PRIVATE: 라이센스 확인 중...");
       if(!CheckLicense())
       {
-         if(licenseOK)
-         {
-            licenseOK = false;
-            Print("Soluni: 라이선스 정지됨. 전체 청산.");
-            CloseSide(OP_BUY);
-            CloseSide(OP_SELL);
-            buyStopped=true; sellStopped=true;
-         }
+         Comment("GOLD PRIVATE: 라이센스 없음 — " + licenseStatus);
+         Print("GOLD PRIVATE 라이센스 실패: ", licenseStatus);
          return;
       }
-      licenseOK = true;
+      licenseOK      = true;
+      licenseChecked = true;
+      Comment("");
+
+      // 위험고지 팝업 (라이센스 확인 직후 1회만)
+      string riskMsg =
+         "EA 시작 전 필수 투자위험 및 책임 고지\n\n"
+         "본 EA는 자동매매 보조 프로그램이며 수익을 보장하지 않습니다\n\n"
+         "레버리지 상품은 시장 변동성 스프레드 확대 슬리피지 체결 지연 서버 장애 증거금 부족 마진콜 강제청산 등으로 인해 큰 손실이 발생할 수 있습니다\n\n"
+         "기본 설정값 안내값 백테스트 과거 운용 결과 예시 수익률 시뮬레이션 자료는 참고용 정보이며 미래 수익이나 손실 제한을 보장하지 않습니다\n\n"
+         "본 프로그램은 투자권유 투자자문 투자일임 대리매매 계좌운용을 목적으로 하지 않습니다\n\n"
+         "EA의 설치 설정 실행 중지 포지션 청산 운용 여부에 대한 최종 판단과 책임은 전적으로 이용자 본인에게 있습니다\n\n"
+         "본인의 투자 경험 재무상태 위험 감내 수준 계좌 상황을 충분히 고려한 뒤 사용 여부를 결정해야 합니다\n\n"
+         "위 내용을 이해했으며 본인 판단과 책임으로 EA를 실행합니다\n\n"
+         "동의하시면 예 버튼을 눌러 시작하세요";
+
+      int res = MessageBox(riskMsg, "GOLD PRIVATE", MB_YESNO|MB_ICONWARNING);
+      if(res != IDYES)
+      {
+         Comment("GOLD PRIVATE: 위험고지 미동의. 거래가 중지됩니다.");
+         Print("GOLD PRIVATE: 위험고지 미동의.");
+         riskAccepted = false;
+         return;
+      }
+      riskAccepted = true;
+      Print("GOLD PRIVATE v9.1 시작 | Acc=",AccountNumber()," | ",licenseStatus);
+      return;
    }
+
+   // ── 라이센스/동의 안 됐으면 매매 중단
+   if(!licenseOK || !riskAccepted) return;
 
    ProcessTrading();
    if(licenseOK && SendBalance) SendBalanceToSupabase();

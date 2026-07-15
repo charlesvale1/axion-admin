@@ -1,287 +1,276 @@
-#property copyright "DQL(diplomat quant logic) by HERITAGE ASSET"
-#property version   "2.00"
-#property description "Soluni v2 | DQL by HERITAGE ASSET | Axion Research"
 
-//============================================================
-// 기본 설정
-//============================================================
-extern string EA_setting   = "======= Soluni v2 | DQL by HERITAGE ASSET =======";
-extern int    MAGIC_No     = 10;
-extern double Lots         = 0.01;
-extern int    SpreadBlock  = 35;
-extern int    EquityLimit  = 0;
+// =====================================================
+// License System
+// =====================================================
+string  g_ProgramName   = "DQL_EA";
+bool    g_licenseOK     = false;
+int     g_licCheckCount = 0;
+datetime g_lastLicCheck = 0;
+bool     g_riskAccepted = false;
+bool     g_riskShown    = false;
+bool     g_licInitDone  = false;
+string   g_licStatusTxt = "확인 중...";
 
-//============================================================
-// Axion Research 라이센스 설정
-//============================================================
-extern string LIC_SET        = "------- Axion Research License -------";
-extern bool   UseLicenseCheck = true;
-extern string LicenseAccountNo= "";
-extern string ProgramName     = "Soluni_v2";
-
-//============================================================
-// 종목명 설정 (UI 표시용)
-//============================================================
-extern string SYM_SET  = "------- 종목명 설정 (6개) -------";
-extern string Sym_0    = "XAUUSD";
-extern string Sym_1    = "EURUSD";
-extern string Sym_2    = "GBPUSD";
-extern string Sym_3    = "USDJPY";
-extern string Sym_4    = "NAS100";
-extern string Sym_5    = "US30";
-
-//============================================================
-// 전역 변수
-//============================================================
-bool     LicenseOK        = false;
-string   LicenseStatus    = "확인 중...";
-datetime LastLicenseCheck = 0;
-bool     RiskNoticeAccepted = false;
-int      NextLevel = 4;
-
-int Distance_0=25,Distance_1=24,Distance_2=23,Distance_3=22,Distance_4=21;
-int Distance_5=20,Distance_6=19,Distance_7=18,Distance_8=17,Distance_9=16;
-
-
-//============================================================
-// Axion Research 라이센스 체크
-//============================================================
-bool CheckLicense()
+bool AxionCheckLicense()
 {
-   if(!UseLicenseCheck)
-   { LicenseOK=true; LicenseStatus="체크 안 함"; return(true); }
-   if(LicenseOK && TimeCurrent()-LastLicenseCheck < 3600)
+   if(g_licenseOK && (TimeCurrent() - g_lastLicCheck) < 3600)
       return(true);
 
-   string acct = (StringLen(LicenseAccountNo)>0) ? LicenseAccountNo : IntegerToString(AccountNumber());
-   string base = "https://wmvnearoursbmwjqwzww.supabase.co";
-   string body = "{\"account_no\":\""+acct+"\",\"program_name\":\""+ProgramName+"\"}";
-   char req[]; char res[]; string rh;
-   StringToCharArray(body,req,0,StringLen(body)); ArrayResize(req,StringLen(body));
+   string key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
 
-   int ret = WebRequest("POST", base+"/functions/v1/check-license",
-                        "Content-Type: application/json\r\n", 10000, req, res, rh);
-   if(ret<0)
+   string acct = IntegerToString(AccountNumber());
+
+   string url = "https://wmvnearoursbmwjqwzww.supabase.co/rest/v1/customers"
+              + "?account_no=eq." + acct
+              + "&program_name=eq." + g_ProgramName
+              + "&is_active=eq.true"
+              + "&select=expires_at";
+
+   string headers = "apikey: " + key + "\r\n"
+                  + "Authorization: Bearer " + key + "\r\n"
+                  + "Content-Type: application/json\r\n";
+
+   char post[]; char result[]; string rh;
+   ResetLastError();
+   int http = WebRequest("GET", url, headers, 10000, post, result, rh);
+
+   if(http < 0)
    {
-      int err=GetLastError();
-      LicenseStatus=(err==4060)?"WebRequest URL 미등록 (MT4 옵션에서 추가 필요: "+base+")":"네트워크 오류 err="+IntegerToString(err);
-      Print("[Soluni v2] 라이센스 ERROR: ",LicenseStatus);
-      LicenseOK=false; return(false);
-   }
-
-   string resp=CharArrayToString(res);
-   Print("[Soluni v2] 라이센스 HTTP=",ret," body=",resp);
-
-   if(ret!=200 || StringFind(resp,"\"authorized\":true")<0)
-   {
-      string reason="라이센스 없음";
-      int rp=StringFind(resp,"\"reason\":\"");
-      if(rp>=0){ rp+=10; int re=StringFind(resp,"\"",rp); if(re>rp) reason=StringSubstr(resp,rp,re-rp); }
-      LicenseStatus=reason; LicenseOK=false;
-      Print("[Soluni v2] 라이센스 ERROR: ",LicenseStatus);
+      int err = GetLastError();
+      Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
+            " | ERROR err=", IntegerToString(err),
+            (err==4060 ? " (URL 미등록: 도구>옵션>EA에 추가)" : ""));
+      g_licenseOK = false;
       return(false);
    }
 
-   string expStr="";
-   int ep=StringFind(resp,"\"expires_at\":\"");
-   if(ep>=0) expStr=StringSubstr(resp,ep+14,10);
+   string body = CharArrayToString(result);
+   Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
+         " | HTTP: ", IntegerToString(http), " | Body: ", body);
 
-   LicenseOK=true;
-   LicenseStatus="OK (만료: "+expStr+")";
-   LastLicenseCheck=TimeCurrent();
-   Print("[Soluni v2] 라이센스 OK: ",LicenseStatus);
+   if(http != 200 || body == "[]" || StringFind(body, "expires_at") < 0)
+   {
+      g_licenseOK = false;
+      return(false);
+   }
+
+   int s = StringFind(body, "\"expires_at\":\"") + 14;
+   string exp = StringSubstr(body, s, 10);
+   StringReplace(exp, "-", ".");
+
+   if(exp < TimeToString(TimeCurrent(), TIME_DATE))
+   {
+      Print("[License] EXPIRED: ", exp);
+      g_licenseOK = false;
+      return(false);
+   }
+
+   g_licenseOK    = true;
+   g_lastLicCheck = TimeCurrent();
+   Print("[License] OK until ", exp);
    return(true);
 }
+// =====================================================
+//must set MagicNumber up by tens
+//SELLLIMIT be deleted automatically after 5 mins.
+//EquityStart & EquityUp need to be set only on 1 symbol chart
+//Recommend to update EquityStart frome time to time
+
+//5: Total Close & individual close
+//4: Multi Averaging variable Lot
+//3: variable Distance 
+//2: Multi Averaging
+//1: Two-way Averaging
 
 
-//============================================================
-// Soluni v2 대시보드 (우측 상단)
-//============================================================
-string DPFX = "SOL2_";
 
-void DL(string id, string txt, int x, int y, int sz, color clr, string font)
+//사용자외부변수 설정
+extern string EA_setting = "============ JARVIS ULTRA v1.0 ============";
+
+//extern string EA__setting = "============ EA__setting ============";
+extern int MAGIC_No = 10;
+extern double Lots = 0.01;
+
+//extern string EA___setting = "============ EA___setting ============";
+extern int SpreadBlock = 35;
+
+//extern string EA____setting = "============ EA____setting ============";
+extern int EquityLimit = 0; //must set the same
+extern double MarginLevelEntryStop = 500; //below this margin level, EA stops new entries
+
+
+//광역(글로벌)변수 설정
+ int NextLevel = 4; 
+
+ int Distance_0 = 25,Distance_1 = 24,Distance_2 = 23,Distance_3 = 22,Distance_4 = 21;
+ int Distance_5 = 20,Distance_6 = 19,Distance_7 = 18,Distance_8 = 17,Distance_9 = 16;
+
+//START / STOP button variables
+bool EA_ManualRun = true;
+string BTN_START = "JARVIS_ULTRA_START";
+string BTN_STOP  = "JARVIS_ULTRA_STOP";
+
+//margin level calculation
+double GetMarginLevel()
 {
-   string n = DPFX+id;
-   if(ObjectFind(0,n)<0)
-   {
-      ObjectCreate(0,n,OBJ_LABEL,0,0,0);
-      ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
-      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,n,OBJPROP_BACK,false);
-   }
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,sz);
-   ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
-   ObjectSetString(0,n,OBJPROP_TEXT,txt);
-   ObjectSetString(0,n,OBJPROP_FONT,font);
+   if(AccountMargin() <= 0) return(999999);
+   return(AccountEquity() / AccountMargin() * 100.0);
 }
 
-void DR(string id, int x, int y, int w, int h, color bg, color bd)
+//button creation
+void CreateButton(string name,string text,int x,int y,color bg)
 {
-   string n = DPFX+"R_"+id;
-   if(ObjectFind(0,n)<0)
-   {
-      ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
-      ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
-      ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
-      ObjectSetInteger(0,n,OBJPROP_BACK,true);
-   }
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_XSIZE,w);
-   ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
-   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg);
-   ObjectSetInteger(0,n,OBJPROP_COLOR,bd);
-   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+   if(ObjectFind(0,name) < 0)
+      ObjectCreate(0,name,OBJ_BUTTON,0,0,0);
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,80);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,24);
+   ObjectSetInteger(0,name,OBJPROP_BGCOLOR,bg);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clrWhite);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,10);
+   ObjectSetString(0,name,OBJPROP_TEXT,text);
 }
 
-void DrawDashboard(double p0,double p1,double p2,double p3,double p4,double p5)
+bool JarvisShowRiskPopup()
 {
-   int PW=270, x=14, y=14;
-   color CB=C'10,8,3', CH=C'20,15,4', CL=C'65,50,8', CL2=C'35,28,4';
-   color W=clrWhite, G=clrGold, G2=C'180,140,30';
+   string msg = "";
+   msg += "EA 시작 전 필수 투자위험 및 책임 고지\n\n";
+   msg += "본 EA는 자동매매 보조 프로그램이며 수익을 보장하지 않습니다.\n\n";
+   msg += "레버리지 상품은 시장 변동성, 스프레드 확대, 슬리피지, 체결 지연, 서버 장애, 증거금 부족, 마진콜, 강제청산 등으로 인해 큰 손실이 발생할 수 있습니다.\n\n";
+   msg += "기본 설정값, 백테스트, 과거 운용 결과, 예시 수익률, 시뮬레이션 자료는 참고용 정보이며 미래 수익이나 손실 제한을 보장하지 않습니다.\n\n";
+   msg += "본 프로그램은 투자권유, 투자자문, 투자일임, 대리매매, 계좌운용을 목적으로 하지 않습니다.\n\n";
+   msg += "EA의 설치, 설정, 실행, 중지, 포지션 청산, 운용 여부에 대한 최종 판단과 책임은 전적으로 이용자 본인에게 있습니다.\n\n";
+   msg += "본인의 투자 경험, 재무상태, 위험 감내 수준, 계좌 상황을 충분히 고려한 뒤 사용 여부를 결정해야 합니다.\n\n";
+   msg += "위 내용을 이해했으며 본인 판단과 책임으로 EA를 실행합니다.\n\n";
+   msg += "동의하시면 예 버튼을 눌러 시작하세요.";
 
-   // 배경 + 헤더
-   DR("bg",  x,y,PW+2,292,CB,CL);
-   DR("hd",  x,y,PW+2,46, CH,CL);
-   DL("T1","S O L U N I   v 2",         x+14,y+6, 15,G, "Times New Roman Bold");
-   DL("T2","DQL by HERITAGE ASSET  |  Axion Research",x+8,y+30,7,G2,"Arial");
+   int answer = MessageBox(msg, "JARVIS ULTRA 투자위험 고지", MB_YESNO | MB_ICONWARNING);
+   return(answer == IDYES);
+}
 
-   // 계좌 정보
-   int ay=y+50;
-   DR("ab",x,ay,PW+2,40,C'14,11,3',CL2);
-   DR("d1",x+90, ay,1,40,CL2,CL2);
-   DR("d2",x+183,ay,1,40,CL2,CL2);
-   DL("AL","BALANCE",  x+8,  ay+4, 7,G2,"Arial");
-   DL("AE","EQUITY",   x+98, ay+4, 7,G2,"Arial");
-   DL("AF","FLOAT P&L",x+190,ay+4, 7,G2,"Arial");
-   DL("AV1","$"+DoubleToString(AccountBalance(),0),x+8,  ay+18,11,W,"Arial Bold");
-
-   color eqc = AccountEquity()>=AccountBalance() ? clrLimeGreen : clrTomato;
-   DL("AV2","$"+DoubleToString(AccountEquity(),0),x+98,ay+18,11,eqc,"Arial Bold");
-
-   double fp = AccountEquity()-AccountBalance();
-   string fps = (fp>=0?"+$":"-$")+DoubleToString(MathAbs(fp),2);
-   DL("AV3",fps,x+190,ay+18,10,fp>=0?clrLimeGreen:clrTomato,"Arial Bold");
-
-   // 종목별 수익 헤더
-   int ty=ay+44;
-   DR("th",x,ty,PW+2,18,C'18,14,4',CL2);
-   DL("TH","종목별 수익 현황",x+8, ty+3,9,G,"Arial Bold");
-   DL("THL","Lic: "+(LicenseOK?"OK":"없음"),x+204,ty+3,7,LicenseOK?clrLimeGreen:clrTomato,"Arial");
-
-   // 6개 종목 행
-   string syms[6]; syms[0]=Sym_0;syms[1]=Sym_1;syms[2]=Sym_2;syms[3]=Sym_3;syms[4]=Sym_4;syms[5]=Sym_5;
-   double pnls[6]; pnls[0]=p0;pnls[1]=p1;pnls[2]=p2;pnls[3]=p3;pnls[4]=p4;pnls[5]=p5;
-   int rh=22;
-   for(int i=0;i<6;i++)
-   {
-      int ry=ty+20+i*rh;
-      DR("rw"+IntegerToString(i),x,ry,PW+2,rh,i%2==0?CB:C'14,11,3',CL2);
-      DR("rv"+IntegerToString(i),x+152,ry,1,rh,CL2,CL2);
-      DL("SN"+IntegerToString(i),syms[i],x+8,ry+4,9,W,"Arial Bold");
-
-      int bc=0,sc=0;
-      for(int j=0;j<OrdersTotal();j++)
-      {
-         if(!OrderSelect(j,SELECT_BY_POS,MODE_TRADES)) continue;
-         if(OrderMagicNumber()!=MAGIC_No+i) continue;
-         if(OrderType()==OP_BUY) bc++;
-         if(OrderType()==OP_SELL) sc++;
-      }
-      DL("PS"+IntegerToString(i),"B:"+IntegerToString(bc)+" S:"+IntegerToString(sc),
-         x+100,ry+4,8,G2,"Arial");
-
-      string pstr=(pnls[i]>=0?"+$":"-$")+DoubleToString(MathAbs(pnls[i]),2);
-      DL("PL"+IntegerToString(i),pstr,x+163,ry+4,10,pnls[i]>=0?clrLimeGreen:clrTomato,"Arial Bold");
-   }
-
-   // 총 실현손익
-   double tot=p0+p1+p2+p3+p4+p5;
-   int bot=ty+20+6*rh+2;
-   DR("tt",x,bot,PW+2,26,tot>=0?C'8,28,8':C'28,8,8',CL);
-   DL("TTL","총 실현손익",x+8,bot+6,9,W,"Arial Bold");
-   string tstr=(tot>=0?"+$":"-$")+DoubleToString(MathAbs(tot),2);
-   DL("TTV",tstr,x+163,bot+5,12,tot>=0?clrLimeGreen:clrTomato,"Arial Bold");
-
-   // 계좌 총손익 + 시간
-   int bot2=bot+28;
-   DR("ap",x,bot2,PW+2,20,C'14,11,3',CL2);
-   string apstr=(AccountProfit()>=0?"$+":"$-")+DoubleToString(MathAbs(AccountProfit()),2);
-   DL("APL","계좌 총손익  "+apstr,x+8,bot2+3,8,AccountProfit()>=0?clrLimeGreen:clrTomato,"Arial Bold");
-   DL("APT",TimeToString(TimeCurrent(),TIME_SECONDS),x+200,bot2+3,7,G2,"Arial");
-
-   Comment("");
+void DrawControlButtons()
+{
+   CreateButton(BTN_START,"START",10,80,clrDodgerBlue);
+   CreateButton(BTN_STOP,"STOP",95,80,clrCrimson);
 }
 
 int init()
 {
-   LicenseOK = false;
-   LicenseStatus = "확인 중...";
-   RiskNoticeAccepted = false;
-
-   Comment("Soluni v2: Axion Research 라이센스 확인 중...");
-   Sleep(300);
-   if(!CheckLicense())
-   {
-      Comment("Soluni v2: "+LicenseStatus+"\nAxion Research 파트너 페이지에서 권한을 신청하세요.");
-      Alert("Soluni v2: 라이센스 없음. Axion Research 파트너 페이지에서 권한 신청 필요.");
-      return(0);
-   }
-   Comment("");
-
-   string RiskNotice = "";
-   RiskNotice += "EA 시작 전 필수 투자위험 및 책임 고지\n\n";
-   RiskNotice += "본 EA는 자동매매 보조 프로그램이며 수익을 보장하지 않습니다.\n\n";
-   RiskNotice += "레버리지 상품은 시장 변동성, 스프레드 확대, 슬리피지, 체결 지연, 서버 장애,\n";
-   RiskNotice += "증거금 부족, 마진콜, 강제청산 등으로 큰 손실이 발생할 수 있습니다.\n\n";
-   RiskNotice += "기본 설정값, 백테스트, 과거 수익률은 참고용이며 미래 수익을 보장하지 않습니다.\n\n";
-   RiskNotice += "본 프로그램은 투자권유, 투자자문, 투자일임, 대리매매를 목적으로 하지 않습니다.\n\n";
-   RiskNotice += "EA 설치, 설정, 실행, 운용에 대한 최종 판단과 책임은 전적으로 이용자 본인에게 있습니다.\n\n";
-   RiskNotice += "위 내용을 이해했으며 본인 판단과 책임으로 EA를 실행합니다.\n\n";
-   RiskNotice += "동의하시면 예(Yes) 버튼을 눌러 시작하세요.";
-
-   int result = MessageBox(RiskNotice, "Soluni v2 - 필수 투자위험 및 책임 고지", MB_YESNO|MB_ICONWARNING);
-   if(result != IDYES)
-   {
-      RiskNoticeAccepted = false;
-      Print("[Soluni v2] EA 실행이 취소되었습니다.");
-      Comment("Soluni v2: 투자위험 고지 미동의. 매매 차단.");
-      return(0);
-   }
-   RiskNoticeAccepted = true;
+   DrawControlButtons();
+   EventSetTimer(1);
    return(0);
 }
 
+void deinit()
+{
+   EventKillTimer();
+   ObjectDelete(0,BTN_START);
+   ObjectDelete(0,BTN_STOP);
+}
+
+
+
+//+------------------------------------------------------------------+
+//| 잔고 $50 이하 → 전체 청산 후 EA 즉시 종료                          |
+//+------------------------------------------------------------------+
+bool g_balanceHalt = false;
+void CheckBalanceStop()
+{
+   if(g_balanceHalt) return;
+   if(AccountBalance() <= 50.0)
+   {
+      g_balanceHalt = true;
+      // 보유 포지션 전체 청산
+      for(int i = OrdersTotal()-1; i >= 0; i--)
+      {
+         if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+         {
+            if(OrderType()==OP_BUY)
+               OrderClose(OrderTicket(), OrderLots(), Bid, 50, clrRed);
+            else if(OrderType()==OP_SELL)
+               OrderClose(OrderTicket(), OrderLots(), Ask, 50, clrRed);
+            else
+               OrderDelete(OrderTicket());
+         }
+      }
+      Print(">>> 잔고 $50 이하 도달 - EA 종료");
+      Comment("잔고 $50 이하 - EA 종료됨");
+      ExpertRemove();   // EA를 차트에서 즉시 제거 (서버 부하 제거)
+   }
+}
+
+void OnTimer()
+{
+   CheckBalanceStop();   if(g_balanceHalt) return;
+
+   // 위험 고지 (최초 1회)
+   if(!g_riskShown)
+   {
+      g_riskAccepted = JarvisShowRiskPopup();
+      g_riskShown    = true;
+   }
+
+   // 라이센스 확인 (함수 내부에서 1시간 캐싱)
+   AxionCheckLicense();
+   g_licInitDone = true;
+
+   if(!g_riskAccepted)        g_licStatusTxt = "위험고지 미동의 - 정지";
+   else if(!g_licenseOK)      g_licStatusTxt = "라이센스 오류 - 계좌 " + IntegerToString(AccountNumber());
+   else                       g_licStatusTxt = "정상";
+}
+
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+{
+   if(id == CHARTEVENT_OBJECT_CLICK)
+     {
+      if(sparam == BTN_START)
+        {
+         EA_ManualRun = true;
+         ObjectSetInteger(0,BTN_START,OBJPROP_STATE,false);
+        }
+      if(sparam == BTN_STOP)
+        {
+         EA_ManualRun = false;
+         ObjectSetInteger(0,BTN_STOP,OBJPROP_STATE,false);
+        }
+     }
+}
+
+
+
+ 
+
+ 
+ 
+//start구문 시작
 int start()
 {
-// Axion Research 라이센스 재확인 (OK: 1시간 / 실패: 60초)
-if(UseLicenseCheck)
-{
-   int _reChk = LicenseOK ? 3600 : 60;
-   if(TimeCurrent()-LastLicenseCheck >= _reChk)
+DrawControlButtons();
+
+   // 위험고지 미동의 또는 라이센스 미확인/오류 시 매매 차단
+   if(!g_licInitDone || !g_riskAccepted || !g_licenseOK)
    {
-      if(!CheckLicense()) { Comment("Soluni v2: "+LicenseStatus+"\n(60초마다 자동 재확인 중...)"); return(0); }
-      Comment("");
+      Comment(
+      "+++++++++++++++++++++++++++++++","\n",
+      "JARVIS RANDOMWALK EA","\n",
+      "상태= ", g_licStatusTxt,"\n",
+      "+++++++++++++++++++++++++++++++","\n"
+      );
+      return(0);
    }
-   if(!LicenseOK) { Comment("Soluni v2: 라이센스 없음. 거래 중지."); return(0); }
-}
-
-//위험고지 취소/미동의 시 매매 로직 실행 차단
-if(RiskNoticeAccepted != true)
-  {
-   Comment("EA 실행 취소: 투자위험 및 책임 고지 확인이 필요합니다.");
-   return(0);
-  }
-
-//비밀번호 설정
-// [Soluni v2] 비밀번호 방식 제거 - Axion Research 라이센스로 대체 
 
 //계좌번호지정 
-
-// [Soluni v2] 계좌번호 제한 제거 - Axion Research 라이센스로 대체
-
+/*
+if(AccountNumber() != 346953)
+  {
+   Comment(
+   "Please check your MT4 account number.""\n"
+   );    
+   return(0);
+  }
+*/
 
 //EA구동시간봉챠트 지정
 if(Period() != PERIOD_H1)
@@ -496,12 +485,23 @@ for(int i=0; i<OrdersTotal(); i++)
 
 
 //챠트 좌측상단에 표시되는 코멘트
-// Soluni v2 대시보드
-DrawDashboard(
-   Bprofit_0+Sprofit_0, Bprofit_1+Sprofit_1,
-   Bprofit_2+Sprofit_2, Bprofit_3+Sprofit_3,
-   Bprofit_4+Sprofit_4, Bprofit_5+Sprofit_5
-);
+Comment(
+"+++++++++++++++++++++++++++++++","\n",
+"JARVIS RANDOMWALK EA","\n",
+"License= ", g_licStatusTxt,"\n",
+"EA Status= ",(EA_ManualRun ? "RUNNING" : "MANUAL STOP"),"\n",
+"Margin Level= ",DoubleToString(GetMarginLevel(),2),"%","\n",
+"Entry Block Level= ",DoubleToString(MarginLevelEntryStop,0),"%","\n",
+"+++++++++++++++++++++++++++++++","\n"
+/*
+"EA total P/L= ",Bprofit_0+Bprofit_1+Bprofit_2+Bprofit_3+Bprofit_4+Bprofit_5+Bprofit_6+Bprofit_7+Bprofit_8+Bprofit_9+Sprofit_0+Sprofit_1+Sprofit_2+Sprofit_3+Sprofit_4+Sprofit_5+Sprofit_6+Sprofit_7+Sprofit_8+Sprofit_9,"\n",
+"EA BUY P/L= ",Bprofit_0+Bprofit_1+Bprofit_2+Bprofit_3+Bprofit_4+Bprofit_5+Bprofit_6+Bprofit_7+Bprofit_8+Bprofit_9,"\n",
+"EA SELL P/L= ",Sprofit_0+Sprofit_1+Sprofit_2+Sprofit_3+Sprofit_4+Sprofit_5+Sprofit_6+Sprofit_7+Sprofit_8+Sprofit_9,"\n",
+"Account total P/L= ",AccountProfit(),"\n",
+"AccountBalance= ",AccountBalance(),"\n",
+"AccountEquity= ",AccountEquity(),"\n"
+*/
+);  
 
 
 
@@ -646,6 +646,31 @@ if(MarketInfo(Symbol(),MODE_SPREAD) > SpreadBlock)
   {
    return(0);    
   }    
+
+//START / STOP button entry control
+//STOP 상태에서는 기존 포지션 청산 로직은 유지하고, 신규/추가 진입만 중단
+if(EA_ManualRun == false)
+  {
+   Comment(
+   "EA Status= MANUAL STOP","\n",
+   "No new entries until START button is pressed.","\n",
+   "Margin Level= ",DoubleToString(GetMarginLevel(),2),"%","\n"
+   );
+   return(0);
+  }
+
+//Margin Level entry protection
+//마진레벨이 설정값 이하이면 신규/추가 진입 중단, 설정값 위로 회복되면 자동 재개
+if(GetMarginLevel() <= MarginLevelEntryStop)
+  {
+   Comment(
+   "EA Status= MARGIN LEVEL ENTRY BLOCK","\n",
+   "No new entries while margin level is below limit.","\n",
+   "Margin Level= ",DoubleToString(GetMarginLevel(),2),"%","\n",
+   "Entry Block Level= ",DoubleToString(MarginLevelEntryStop,0),"%","\n"
+   );
+   return(0);
+  }
   
   
 //0
@@ -653,120 +678,100 @@ if(MarketInfo(Symbol(),MODE_SPREAD) > SpreadBlock)
 if(Bcount_0 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_0,Ask,10,0,0,"AutoTradingRobot",MAGIC_No,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_0 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_0,Bid,10,0,0,"AutoTradingRobot",MAGIC_No,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }  
 
 //1  
 if(Bcount_0 >= NextLevel && Bcount_1 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_1,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+1,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_0 >= NextLevel && Scount_1 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_1,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+1,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }  
   
 //2
 if(Bcount_1 >= NextLevel && Bcount_2 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_2,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+2,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_1 >= NextLevel && Scount_2 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_2,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+2,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }       
 
 //3
 if(Bcount_2 >= NextLevel && Bcount_3 == 0)
   {
-   ticket = OrderSend(Symbol(),OP_BUY,Lot_3,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+3,0,clrBlue); 
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));   
+   ticket = OrderSend(Symbol(),OP_BUY,Lot_3,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+3,0,clrBlue);  
   }
 if(Scount_2 >= NextLevel && Scount_3 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_3,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+3,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }  
   
 //4
 if(Bcount_3 >= NextLevel && Bcount_4 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_4,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+4,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_3 >= NextLevel && Scount_4 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_4,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+4,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }  
   
 //5
 if(Bcount_4 >= NextLevel && Bcount_5 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_5,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+5,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_4 >= NextLevel && Scount_5 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_5,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+5,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }  
 
 //6
 if(Bcount_5 >= NextLevel && Bcount_6 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_6,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+6,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_5 >= NextLevel && Scount_6 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_6,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+6,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }                   
 
 //7
 if(Bcount_6 >= NextLevel && Bcount_7 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_7,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+7,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_6 >= NextLevel && Scount_7 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_7,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+7,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }    
   
 //8
 if(Bcount_7 >= NextLevel && Bcount_8 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_8,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+8,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_7 >= NextLevel && Scount_8 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_8,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+8,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }      
   
 //9
 if(Bcount_8 >= NextLevel && Bcount_9 == 0)
   {
    ticket = OrderSend(Symbol(),OP_BUY,Lot_9,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+9,0,clrBlue);  
-   Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }
 if(Scount_8 >= NextLevel && Scount_9 == 0)
   {
    ticket = OrderSend(Symbol(),OP_SELL,Lot_9,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+9,0,clrRed);  
-   Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
   }      
      
      
@@ -779,7 +784,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_0 - Distance_0*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_0,Ask,10,0,0,"AutoTradingRobot",MAGIC_No,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -788,7 +792,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_0 + Distance_0*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_0,Bid,10,0,0,"AutoTradingRobot",MAGIC_No,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      } 
@@ -799,7 +802,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_1 - Distance_1*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_1,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+1,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -808,7 +810,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_1 + Distance_1*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_1,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+1,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }    
@@ -819,7 +820,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_2 - Distance_2*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_2,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+2,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -828,7 +828,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_2 + Distance_2*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_2,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+2,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }    
@@ -839,7 +838,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_3 - Distance_3*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_3,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+3,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -848,7 +846,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_3 + Distance_3*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_3,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+3,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -859,7 +856,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_4 - Distance_4*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_4,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+4,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -868,7 +864,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_4 + Distance_4*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_4,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+4,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -879,7 +874,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_5 - Distance_5*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_5,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+5,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -888,7 +882,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_5 + Distance_5*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_5,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+5,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -899,7 +892,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_6 - Distance_6*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_6,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+6,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -908,7 +900,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_6 + Distance_6*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_6,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+6,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -919,7 +910,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_7 - Distance_7*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_7,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+7,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -928,7 +918,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_7 + Distance_7*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_7,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+7,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -939,7 +928,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_8 - Distance_8*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_8,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+8,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -948,7 +936,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_8 + Distance_8*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_8,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+8,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }   
@@ -959,7 +946,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Ask <= Bopen_9 - Distance_9*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_BUY,Lot_9,Ask,10,0,0,"AutoTradingRobot",MAGIC_No+9,0,clrBlue);  
-         Print("ASK = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_ASK),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }
@@ -968,7 +954,6 @@ if(iVolume(Symbol(),PERIOD_H1,0) < 4)
       if(Bid >= Sopen_9 + Distance_9*Point*10)
         {
          ticket = OrderSend(Symbol(),OP_SELL,Lot_9,Bid,10,0,0,"AutoTradingRobot",MAGIC_No+9,0,clrRed);  
-         Print("BID = ",DoubleToStr(NormalizeDouble(MarketInfo(Symbol(),MODE_BID),5),5)," / SPREAD = ",MarketInfo(Symbol(),MODE_SPREAD));  
          return(0);
         }
      }                                             
