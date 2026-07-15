@@ -107,7 +107,6 @@ string   g_ApiKey       = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 bool     g_licenseOK    = false;
 datetime g_lastLicCheck = 0;
 datetime g_lastBalSend  = 0;
-bool     g_licInitDone  = false;
 string   g_licStatusTxt = "확인 중...";
 bool     g_riskAccepted = false;
 bool     g_riskShown    = false;
@@ -261,6 +260,12 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+   // 틱이 유실되거나 OnTick이 굶는 구간에서도 최소 1초 해상도로 바스켓을 관리한다.
+   // MT4는 처리 중 도착한 틱을 큐잉하지 않고 버리므로, CheckSideBasket이 유일한
+   // 청산 장치인 이상 이중화가 필요하다.
+   CheckSideBasket(OP_BUY);
+   CheckSideBasket(OP_SELL);
+
    // 위험 고지 (최초 1회)
    if(!g_riskShown)
    {
@@ -269,28 +274,34 @@ void OnTimer()
    }
 
    BPCheckLicense();
-   g_licInitDone = true;
 
    BPSendBalance();
 }
 
+//+------------------------------------------------------------------+
+//| 매매 허용 조건. 청산은 이 게이트와 무관하게 항상 실행된다.        |
+//+------------------------------------------------------------------+
+bool TradingAllowed()
+{
+   if(!g_running)      return false;
+   if(!g_licenseOK)    return false;
+   if(!g_riskAccepted) return false;
+   return true;
+}
+
 void OnTick()
 {
-   // 위험고지 미동의 또는 라이센스 미확인/미통과 시 매매 차단 (패널은 표시)
-   if(!g_licInitDone || !g_riskAccepted || !g_licenseOK)
-   {
-      if(ShowPanel) DrawPanel();
-      return;
-   }
-
-   if(!g_running)
-   {
-      if(ShowPanel) DrawPanel();
-      return;
-   }
-
+   // 이 EA는 브로커측 TP/SL을 심지 않는다(OpenOrder의 sl=0, tp=0).
+   // CheckSideBasket이 유일한 청산 장치이므로 라이선스·동의 상태와 무관하게
+   // 항상 실행해야 보유 그리드가 방치되지 않는다.
    CheckSideBasket(OP_BUY);
    CheckSideBasket(OP_SELL);
+
+   if(!TradingAllowed())   // 신규 진입·추가 진입만 차단
+   {
+      if(ShowPanel) DrawPanel();
+      return;
+   }
 
    if(IsNewBar())
    {
