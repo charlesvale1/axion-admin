@@ -1,0 +1,5 @@
+# MQL4 컴파일 산출물 — 매 컴파일마다 재생성되는 바이너리
+*.ex4
+
+# JetBrains IDE
+.idea/
