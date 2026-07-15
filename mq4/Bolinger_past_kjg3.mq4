@@ -84,6 +84,7 @@ input bool   DrawBandTouchMarks = true;
 input string SETTING__________12 = "============ LICENSE / SERVER ============";
 input bool   SendBalance = true;          // 잔고 서버 전송
 input int    SendBalanceMinutes = 5;      // 잔고 전송 주기(분)
+input int    LicenseGraceTries = 5;       // 일시 장애 유예: 연속 실패 이 횟수까지 매매 유지(60초 간격, 상한 30)
 
 bool     g_running = false;
 datetime g_lastBarTime = 0;
@@ -105,11 +106,16 @@ string   g_ProgramName  = "Bolinger_past";
 string   g_ServerUrl    = "https://wmvnearoursbmwjqwzww.supabase.co";
 string   g_ApiKey       = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
 bool     g_licenseOK    = false;
-datetime g_lastLicCheck = 0;
+datetime g_lastLicCheck = 0;   // TimeLocal 기준 — 틱 없는 주말에도 주기가 흘러야 한다
 datetime g_lastBalSend  = 0;
 string   g_licStatusTxt = "확인 중...";
 bool     g_riskAccepted = false;
 bool     g_riskShown    = false;
+
+// 라이선스 유예 상태
+bool     g_licenseChecked    = false;  // 최초 라이선스 확인 성공 여부
+bool     g_licenseDenied     = false;  // 서버가 명시적으로 거부(일시 장애와 구분)
+int      g_licenseFailStreak = 0;      // 연속 확인 실패 횟수
 
 bool BPShowRiskPopup()
 {
@@ -130,10 +136,14 @@ bool BPShowRiskPopup()
    return(answer == IDYES);
 }
 
+//+------------------------------------------------------------------+
+//| 라이선스 조회 (순수 함수 — g_licenseOK를 대입하지 않는다)         |
+//| g_licenseDenied: 서버가 계좌를 명시적으로 거부한 경우에만 true.   |
+//| 네트워크/서버 장애는 false로 남겨 유예 로직이 즉시 청산하지 않게. |
+//+------------------------------------------------------------------+
 bool BPCheckLicense()
 {
-   if(g_licenseOK && (TimeCurrent() - g_lastLicCheck) < 3600)
-      return(true);
+   g_licenseDenied = false;
 
    string acct = IntegerToString(AccountNumber());
 
@@ -154,12 +164,14 @@ bool BPCheckLicense()
    // 무관리 구간만 늘린다.
    int http = WebRequest("GET", url, headers, 3000, post, result, rh);
 
+   // 네트워크 장애 — 확정 거부가 아니므로 유예 대상
    if(http < 0)
    {
       int err = GetLastError();
-      g_licStatusTxt = (err==4060) ? "URL 미등록" : "연결 오류 (" + IntegerToString(err) + ")";
-      Print("[License] Program: ", g_ProgramName, " | Account: ", acct, " | ERROR err=", IntegerToString(err));
-      g_licenseOK = false;
+      g_licStatusTxt = (err==4060) ? "URL 미등록 (도구>옵션>EA)"
+                                   : "네트워크 오류 (" + IntegerToString(err) + ")";
+      Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
+            " | ERROR err=", IntegerToString(err));
       return(false);
    }
 
@@ -167,35 +179,101 @@ bool BPCheckLicense()
    Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
          " | HTTP: ", IntegerToString(http), " | Body: ", body);
 
-   if(http != 200 || body == "[]" || StringFind(body, "expires_at") < 0)
+   // 서버 장애(4xx/5xx) — 확정 거부로 취급하지 않는다. 유예 대상.
+   if(http != 200)
    {
-      g_licStatusTxt = "미등록 계좌 (HTTP=" + IntegerToString(http) + ")";
-      g_licenseOK = false;
+      g_licStatusTxt = "서버 오류 (HTTP=" + IntegerToString(http) + ")";
       return(false);
    }
 
-   int s = StringFind(body, "\"expires_at\":\"") + 14;
-   string exp = StringSubstr(body, s, 10);
+   // HTTP 200 + expires_at 없음 → 서버가 판정한 확정 거부(미등록/비활성/EA 미할당).
+   // StringFind 결과를 먼저 검사해야 한다. expires_at이 null이면 "\"expires_at\":\""
+   // 패턴이 없어 -1이 반환되는데, 이를 검사 없이 +14 하면 엉뚱한 문자열이 잘려
+   // 만료 검사를 우연히 통과한다.
+   int q = StringFind(body, "\"expires_at\":\"");
+   if(q < 0)
+   {
+      g_licenseDenied = true;
+      g_licStatusTxt  = "미등록 계좌";
+      return(false);
+   }
+
+   string exp = StringSubstr(body, q + 14, 10);
    StringReplace(exp, "-", ".");
 
    if(exp < TimeToString(TimeCurrent(), TIME_DATE))
    {
-      g_licStatusTxt = "만료됨 (" + exp + ")";
-      g_licenseOK = false;
+      g_licenseDenied = true;
+      g_licStatusTxt  = "만료됨 (" + exp + ")";
       return(false);
    }
 
-   g_licenseOK    = true;
-   g_lastLicCheck = TimeCurrent();
    g_licStatusTxt = "정상 (" + exp + "까지)";
    Print("[License] OK until ", exp);
    return(true);
 }
 
+//+------------------------------------------------------------------+
+//| 라이선스 확인/재검증 — 주기와 유예를 전담                          |
+//| 간격: 정상 3600초 / 실패 60초. 실효 확정 시 보유 포지션 청산.     |
+//+------------------------------------------------------------------+
+void MaintainLicense()
+{
+   // 정상 확인된 상태에서만 1시간 간격. 실패가 시작되면(유예 중 포함) 60초 간격으로
+   // 재시도해야 LicenseGraceTries가 의도한 유예 시간(횟수 x 60초)이 된다.
+   // 이 게이트가 g_licenseOK와 무관하게 동작하므로, 서버 불통 시 매 초 WebRequest가
+   // 재발행되어 EA가 상시 블로킹되던 문제도 함께 해소된다.
+   int intervalSec = (g_licenseOK && g_licenseFailStreak == 0) ? 3600 : 60;
+   if(g_lastLicCheck != 0 && TimeLocal() - g_lastLicCheck < intervalSec) return;
+   g_lastLicCheck = TimeLocal();
+
+   if(BPCheckLicense())
+   {
+      g_licenseOK         = true;
+      g_licenseFailStreak = 0;
+      g_licenseChecked    = true;
+      return;
+   }
+
+   g_licenseFailStreak++;
+
+   // 최초 인증 전 — 매매가 시작된 적이 없으므로 청산할 포지션이 없다
+   if(!g_licenseChecked) return;
+
+   // 이미 실효 처리됨 — 직전 청산이 부분 실패했을 수 있으므로 잔여 포지션 재청산
+   if(!g_licenseOK)
+   {
+      if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "LICENSE_REVOKED");
+      if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "LICENSE_REVOKED");
+      return;
+   }
+
+   int graceTries = LicenseGraceTries;
+   if(graceTries < 1)  graceTries = 1;
+   if(graceTries > 30) graceTries = 30;   // 상한: 무기한 유예로 라이선스를 우회하지 못하도록
+
+   if(!g_licenseDenied && g_licenseFailStreak <= graceTries)
+   {
+      Print("Bolinger_past: 라이선스 확인 일시 실패 (", g_licenseFailStreak, "/", graceTries,
+            ") — 매매 유지 / ", g_licStatusTxt);
+      return;
+   }
+
+   g_licenseOK = false;
+   Print("Bolinger_past: 라이선스 실효 — 전체 청산 후 매매 중단 / ", g_licStatusTxt);
+   CloseSide(OP_BUY,  "LICENSE_REVOKED");
+   CloseSide(OP_SELL, "LICENSE_REVOKED");
+}
+
 // force=true 이면 주기와 무관하게 즉시 전송 (청산 직후 등)
 void BPSendBalance(bool force = false)
 {
-   if(!SendBalance || !g_licenseOK) return;
+   if(!SendBalance) return;
+   // g_licenseOK가 아니라 g_licenseChecked로 판정한다. MaintainLicense가 실효
+   // 처리 시 g_licenseOK=false를 먼저 대입한 뒤 CloseSide를 부르므로, CloseSide
+   // 말미의 BPSendBalance(true)가 g_licenseOK 가드에 걸리면 실효 청산으로 확정된
+   // 잔고가 적재되지 않는다. 한 번도 인증된 적 없는 계좌는 여전히 전송하지 않는다.
+   if(!g_licenseChecked) return;
 
    int interval = SendBalanceMinutes * 60;
    if(interval < 60) interval = 60;
@@ -277,7 +355,7 @@ void OnTimer()
       g_riskShown    = true;
    }
 
-   BPCheckLicense();
+   MaintainLicense();
 
    BPSendBalance();
 }
