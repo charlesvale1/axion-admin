@@ -906,6 +906,22 @@ void SetupChart()
    ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrDodgerBlue);
 }
 
+//+------------------------------------------------------------------+
+//| 패널 STATUS 줄 — 정지 사유를 구분해 표시한다                      |
+//+------------------------------------------------------------------+
+string PanelStatusText()
+{
+   if(g_balanceHalt)              return("HALTED (MIN EQUITY)");
+   if(g_lastLicCheck == 0)        return("LICENSE 확인 중");
+   if(!g_licenseChecked)          return("NO LICENSE");
+   if(!g_licenseOK)               return("LICENSE 실효 - 청산됨");
+   if(g_licenseFailStreak > 0)    return("LICENSE 재확인 중 (유예)");
+   if(g_riskDeferred)             return("위험고지 대기 (청산만 관리)");
+   if(!g_riskAccepted)            return("위험고지 미동의");
+   if(!g_running)                 return("PAUSED");
+   return("RUNNING");
+}
+
 void DrawPanel()
 {
    int panelX = 8, panelY = 24, panelW = 390, panelH = 280, topH = 30;
@@ -937,7 +953,8 @@ void DrawPanel()
    SetPanelLine(line++, "Bolinger_past", clrWhite, 15);
    SetPanelLine(line++, "LICENSE       : " + g_licStatusTxt, g_licenseOK ? clrLime : clrTomato, 9);
    SetPanelLine(line++, "SYMBOL / TF   : " + Symbol() + " / " + IntegerToString(Period()), clrWhite, 9);
-   SetPanelLine(line++, "STATUS        : " + (g_running ? "RUNNING" : "PAUSED"), g_running ? clrLime : clrTomato, 9);
+   bool statusOK = (g_running && g_licenseOK && g_riskAccepted && !g_balanceHalt);
+   SetPanelLine(line++, "STATUS        : " + PanelStatusText(), statusOK ? clrLime : clrTomato, 9);
    SetPanelLine(line++, "BB PERIOD/DEV : " + IntegerToString(BBperiod) + " / " + DoubleToString(BBdeviation, 2), clrGold, 9);
    SetPanelLine(line++, "UPPER ARMED   : " + (g_upperBreakoutArmed ? "READY" : "NO"), g_upperBreakoutArmed ? clrGold : clrSilver, 9);
    SetPanelLine(line++, "LOWER ARMED   : " + (g_lowerBreakoutArmed ? "READY" : "NO"), g_lowerBreakoutArmed ? clrDodgerBlue : clrSilver, 9);
