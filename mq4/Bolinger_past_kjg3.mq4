@@ -237,7 +237,9 @@ void MaintainLicense()
 
    g_licenseFailStreak++;
 
-   // 최초 인증 전 — 매매가 시작된 적이 없으므로 청산할 포지션이 없다
+   // 최초 인증 전에는 확정 거부와 기동 시 네트워크 장애를 구분할 수 없다.
+   // 여기서 청산하면 부팅 중 통신 장애만으로 정상 고객 포지션이 청산되므로,
+   // 신규 진입만 차단(TradingAllowed)하고 기존 포지션은 CheckSideBasket에 맡긴다.
    if(!g_licenseChecked) return;
 
    // 이미 실효 처리됨 — 직전 청산이 부분 실패했을 수 있으므로 잔여 포지션 재청산
@@ -261,8 +263,8 @@ void MaintainLicense()
 
    g_licenseOK = false;
    Print("Bolinger_past: 라이선스 실효 — 전체 청산 후 매매 중단 / ", g_licStatusTxt);
-   CloseSide(OP_BUY,  "LICENSE_REVOKED");
-   CloseSide(OP_SELL, "LICENSE_REVOKED");
+   if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "LICENSE_REVOKED");
+   if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "LICENSE_REVOKED");
 }
 
 // force=true 이면 주기와 무관하게 즉시 전송 (청산 직후 등)
