@@ -84,6 +84,10 @@ input bool   DrawBandTouchMarks = true;
 input string SETTING__________12 = "============ LICENSE / SERVER ============";
 input bool   SendBalance = true;          // 잔고 서버 전송
 input int    SendBalanceMinutes = 5;      // 잔고 전송 주기(분)
+input int    LicenseGraceTries = 5;       // 일시 장애 유예: 연속 실패 이 횟수까지 매매 유지(60초 간격, 상한 30)
+
+input string SETTING__________13 = "============ MIN EQUITY STOP ============";
+input double MinEquityStop = 50.0;        // 순자산/잔고가 이 값 이하면 전체 청산 후 EA 종료 (0=비활성)
 
 bool     g_running = false;
 datetime g_lastBarTime = 0;
@@ -105,12 +109,18 @@ string   g_ProgramName  = "Bolinger_past";
 string   g_ServerUrl    = "https://wmvnearoursbmwjqwzww.supabase.co";
 string   g_ApiKey       = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtdm5lYXJvdXJzYm13anF3end3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzQ5MjEsImV4cCI6MjA5Mzc1MDkyMX0.MS4iSGIvW4dBi3sd8J3baHLT4TlgUJS5lXwlhJdWYEY";
 bool     g_licenseOK    = false;
-datetime g_lastLicCheck = 0;
+datetime g_lastLicCheck = 0;   // TimeLocal 기준 — 틱 없는 주말에도 주기가 흘러야 한다
 datetime g_lastBalSend  = 0;
-bool     g_licInitDone  = false;
 string   g_licStatusTxt = "확인 중...";
 bool     g_riskAccepted = false;
-bool     g_riskShown    = false;
+bool     g_riskPrompted = false;  // 위험고지 모달을 이미 띄웠는지(세션 내 재표시 방지)
+bool     g_riskDeferred = false;  // 보유 포지션으로 모달을 보류한 상태
+
+// 라이선스 유예 상태
+bool     g_licenseChecked    = false;  // 최초 라이선스 확인 성공 여부
+bool     g_licenseDenied     = false;  // 서버가 명시적으로 거부(일시 장애와 구분)
+int      g_licenseFailStreak = 0;      // 연속 확인 실패 횟수
+bool     g_balanceHalt       = false;  // MinEquityStop 도달로 정지한 상태
 
 bool BPShowRiskPopup()
 {
@@ -131,10 +141,66 @@ bool BPShowRiskPopup()
    return(answer == IDYES);
 }
 
+//+------------------------------------------------------------------+
+//| 위험고지 동의 — 계좌당 최초 1회만 팝업                            |
+//+------------------------------------------------------------------+
+string RiskConsentKey()
+{
+   return("BOLINGER_PAST_RISK_OK_" + IntegerToString((int)AccountNumber()));
+}
+
+bool PromptRiskDisclosure()
+{
+   if(g_riskAccepted) return(true);
+   if(!ShowKoreanRiskPopup) { g_riskAccepted = true; return(true); }
+
+   // 이 계좌에서 이미 동의했으면 다시 묻지 않는다.
+   string key = RiskConsentKey();
+   if(GlobalVariableCheck(key))
+   {
+      GlobalVariableSet(key, 1);   // MT4는 4주 미사용 시 삭제 — 접근 시각 갱신
+      g_riskAccepted = true;
+      g_riskDeferred = false;
+      return(true);
+   }
+
+   if(g_riskPrompted) return(false);   // 이미 물었고 거부당했다
+
+   // 보유 포지션이 있으면 모달을 띄우지 않는다. MessageBox는 모달이라 스레드를
+   // 잡으며, 그동안 유일한 청산 장치인 CheckSideBasket이 멈춰 그리드가 방치된다.
+   // 청산 관리를 계속하면서 플랫이 될 때까지 팝업을 미룬다.
+   // (신규 진입은 g_riskAccepted=false 이므로 TradingAllowed()가 계속 차단한다.)
+   if(CountSide(OP_BUY) + CountSide(OP_SELL) > 0)
+   {
+      if(!g_riskDeferred)
+      {
+         g_riskDeferred = true;
+         Print("Bolinger_past: 보유 포지션이 있어 위험고지 팝업을 보류합니다 — 청산 관리는 계속됩니다");
+         Alert("Bolinger_past: 위험고지 동의 필요 — 보유 포지션 청산 후 팝업이 표시됩니다");
+      }
+      return(false);
+   }
+
+   g_riskPrompted = true;
+   g_riskDeferred = false;
+
+   if(BPShowRiskPopup())
+   {
+      g_riskAccepted = true;
+      GlobalVariableSet(key, 1);
+      return(true);
+   }
+   return(false);
+}
+
+//+------------------------------------------------------------------+
+//| 라이선스 조회 (순수 함수 — g_licenseOK를 대입하지 않는다)         |
+//| g_licenseDenied: 서버가 계좌를 명시적으로 거부한 경우에만 true.   |
+//| 네트워크/서버 장애는 false로 남겨 유예 로직이 즉시 청산하지 않게. |
+//+------------------------------------------------------------------+
 bool BPCheckLicense()
 {
-   if(g_licenseOK && (TimeCurrent() - g_lastLicCheck) < 3600)
-      return(true);
+   g_licenseDenied = false;
 
    string acct = IntegerToString(AccountNumber());
 
@@ -150,14 +216,19 @@ bool BPCheckLicense()
 
    char post[]; char result[]; string rh;
    ResetLastError();
-   int http = WebRequest("GET", url, headers, 10000, post, result, rh);
+   // 타임아웃을 짧게 잡는다. OnTimer는 OnTick과 같은 스레드이므로 대기하는 동안
+   // 유일한 청산 장치인 CheckSideBasket이 멈춘다. 긴 타임아웃은 이득 없이
+   // 무관리 구간만 늘린다.
+   int http = WebRequest("GET", url, headers, 3000, post, result, rh);
 
+   // 네트워크 장애 — 확정 거부가 아니므로 유예 대상
    if(http < 0)
    {
       int err = GetLastError();
-      g_licStatusTxt = (err==4060) ? "URL 미등록" : "연결 오류 (" + IntegerToString(err) + ")";
-      Print("[License] Program: ", g_ProgramName, " | Account: ", acct, " | ERROR err=", IntegerToString(err));
-      g_licenseOK = false;
+      g_licStatusTxt = (err==4060) ? "URL 미등록 (도구>옵션>EA)"
+                                   : "네트워크 오류 (" + IntegerToString(err) + ")";
+      Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
+            " | ERROR err=", IntegerToString(err));
       return(false);
    }
 
@@ -165,35 +236,139 @@ bool BPCheckLicense()
    Print("[License] Program: ", g_ProgramName, " | Account: ", acct,
          " | HTTP: ", IntegerToString(http), " | Body: ", body);
 
-   if(http != 200 || body == "[]" || StringFind(body, "expires_at") < 0)
+   // 서버 장애(4xx/5xx) — 확정 거부로 취급하지 않는다. 유예 대상.
+   if(http != 200)
    {
-      g_licStatusTxt = "미등록 계좌 (HTTP=" + IntegerToString(http) + ")";
-      g_licenseOK = false;
+      g_licStatusTxt = "서버 오류 (HTTP=" + IntegerToString(http) + ")";
       return(false);
    }
 
-   int s = StringFind(body, "\"expires_at\":\"") + 14;
-   string exp = StringSubstr(body, s, 10);
+   // PostgREST가 실제로 답한 JSON 배열일 때만 확정 거부를 인정한다. TLS를 가로채는
+   // 프록시나 캡티브 포털이 HTML을 200으로 돌려주면 expires_at이 없어 미등록 계좌로
+   // 오판되어 유예 없이 청산된다. 형식이 다르면 서버 응답이 아니므로 유예 대상이다.
+   string trimmed = body;
+   StringTrimLeft(trimmed);
+   if(StringGetChar(trimmed, 0) != '[')
+   {
+      g_licStatusTxt = "응답 형식 오류 (프록시?)";
+      Print("[License] 응답이 JSON 배열이 아님 — 서버 응답으로 보지 않는다");
+      return(false);
+   }
+
+   // HTTP 200 + expires_at 없음 → 서버가 판정한 확정 거부(미등록/비활성/EA 미할당).
+   // StringFind 결과를 먼저 검사해야 한다. expires_at이 null이면 "\"expires_at\":\""
+   // 패턴이 없어 -1이 반환되는데, 이를 검사 없이 +14 하면 엉뚱한 문자열이 잘려
+   // 만료 검사를 우연히 통과한다.
+   int q = StringFind(body, "\"expires_at\":\"");
+   if(q < 0)
+   {
+      g_licenseDenied = true;
+      g_licStatusTxt  = "미등록 계좌";
+      return(false);
+   }
+
+   string exp = StringSubstr(body, q + 14, 10);
    StringReplace(exp, "-", ".");
 
    if(exp < TimeToString(TimeCurrent(), TIME_DATE))
    {
-      g_licStatusTxt = "만료됨 (" + exp + ")";
-      g_licenseOK = false;
+      g_licenseDenied = true;
+      g_licStatusTxt  = "만료됨 (" + exp + ")";
       return(false);
    }
 
-   g_licenseOK    = true;
-   g_lastLicCheck = TimeCurrent();
    g_licStatusTxt = "정상 (" + exp + "까지)";
    Print("[License] OK until ", exp);
    return(true);
 }
 
+//+------------------------------------------------------------------+
+//| 라이선스 확인/재검증 — 주기와 유예를 전담                          |
+//| 간격: 정상 3600초 / 실패 60초. 실효 확정 시 보유 포지션 청산.     |
+//+------------------------------------------------------------------+
+void MaintainLicense()
+{
+   // 정상 확인된 상태에서만 1시간 간격. 실패가 시작되면(유예 중 포함) 60초 간격으로
+   // 재시도해야 LicenseGraceTries가 의도한 유예 시간(횟수 x 60초)이 된다.
+   // 이 게이트가 g_licenseOK와 무관하게 동작하므로, 서버 불통 시 매 초 WebRequest가
+   // 재발행되어 EA가 상시 블로킹되던 문제도 함께 해소된다.
+   int intervalSec = (g_licenseOK && g_licenseFailStreak == 0) ? 3600 : 60;
+   if(g_lastLicCheck != 0 && TimeLocal() - g_lastLicCheck < intervalSec) return;
+   g_lastLicCheck = TimeLocal();
+
+   if(BPCheckLicense())
+   {
+      g_licenseOK         = true;
+      g_licenseFailStreak = 0;
+      g_licenseChecked    = true;
+
+      // 동의 기록의 접근 시각을 주기적으로 갱신한다. 갱신이 부착 시점에만 일어나면
+      // 4주 넘게 무중단 가동할 때 MT4가 변수를 삭제해, 다음 재부착에서 모달이 뜬다.
+      // 이미 존재하는 동의 기록의 접근 시각만 갱신한다. GlobalVariableCheck 없이
+      // 쓰면 ShowKoreanRiskPopup=false로 돌린 계좌(동의 절차를 거치지 않아
+      // g_riskAccepted만 true인 상태)에 동의 기록이 새로 생겨, 나중에 팝업을
+      // 다시 켜도 고지가 표시되지 않는다.
+      if(g_riskAccepted && GlobalVariableCheck(RiskConsentKey()))
+         GlobalVariableSet(RiskConsentKey(), 1);
+      return;
+   }
+
+   g_licenseFailStreak++;
+
+   // 확정 거부라도 최초 인증 전이면 청산하지 않는다. 만료된 라이선스로 EA를
+   // 재시작한 경우 이전 세션의 그리드가 남아 있을 수 있는데, 이 EA가 그것을
+   // 진입시켰는지 확인할 방법이 없다. 신규 진입은 TradingAllowed가 계속 차단하고
+   // 보유분은 CheckSideBasket이 TP로 관리한다.
+   if(!g_licenseChecked) return;
+
+   // 이미 진입이 차단된 상태 — 확정 거부일 때만 잔여 포지션을 재청산한다.
+   // (직전 청산이 리쿼트 등으로 부분 실패했을 수 있다.)
+   // 통신 장애로 차단된 경우에는 청산하지 않는다. 서버가 거부한 적이 없으므로
+   // 보유 그리드는 CheckSideBasket이 TP로 정리하게 두고, 신규 진입만 막는다.
+   if(!g_licenseOK)
+   {
+      if(!g_licenseDenied) return;
+      if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "LICENSE_REVOKED");
+      if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "LICENSE_REVOKED");
+      return;
+   }
+
+   int graceTries = LicenseGraceTries;
+   if(graceTries < 1)  graceTries = 1;
+   if(graceTries > 30) graceTries = 30;   // 상한: 무기한 유예로 라이선스를 우회하지 못하도록
+
+   if(!g_licenseDenied && g_licenseFailStreak <= graceTries)
+   {
+      Print("Bolinger_past: 라이선스 확인 일시 실패 (", g_licenseFailStreak, "/", graceTries,
+            ") — 매매 유지 / ", g_licStatusTxt);
+      return;
+   }
+
+   g_licenseOK = false;   // 신규·추가 진입 차단 (TradingAllowed)
+
+   // 서버가 거부한 적이 없다면 청산하지 않는다. 통신 장애만으로 보유 그리드를
+   // 시장가로 확정 청산하면 회복 가능한 상태가 영구 손실이 된다. 진입은 이미
+   // 막혔으므로 통신을 끊어 라이선스를 우회할 수는 없다.
+   if(!g_licenseDenied)
+   {
+      Print("Bolinger_past: 라이선스 확인 장기 실패 — 신규 진입 차단 / 보유분 TP 관리 유지 / ", g_licStatusTxt);
+      return;
+   }
+
+   Print("Bolinger_past: 라이선스 실효 — 전체 청산 후 매매 중단 / ", g_licStatusTxt);
+   if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "LICENSE_REVOKED");
+   if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "LICENSE_REVOKED");
+}
+
 // force=true 이면 주기와 무관하게 즉시 전송 (청산 직후 등)
 void BPSendBalance(bool force = false)
 {
-   if(!SendBalance || !g_licenseOK) return;
+   if(!SendBalance) return;
+   // g_licenseOK가 아니라 g_licenseChecked로 판정한다. MaintainLicense가 실효
+   // 처리 시 g_licenseOK=false를 먼저 대입한 뒤 CloseSide를 부르므로, CloseSide
+   // 말미의 BPSendBalance(true)가 g_licenseOK 가드에 걸리면 실효 청산으로 확정된
+   // 잔고가 적재되지 않는다. 한 번도 인증된 적 없는 계좌는 여전히 전송하지 않는다.
+   if(!g_licenseChecked) return;
 
    int interval = SendBalanceMinutes * 60;
    if(interval < 60) interval = 60;
@@ -219,7 +394,8 @@ void BPSendBalance(bool force = false)
    ArrayResize(post, StringLen(body));
 
    ResetLastError();
-   int http = WebRequest("POST", g_ServerUrl + "/rest/v1/balance_logs", headers, 5000, post, result, rh);
+   // 스레드 블로킹 최소화 (CheckSideBasket 정지 방지)
+   int http = WebRequest("POST", g_ServerUrl + "/rest/v1/balance_logs", headers, 3000, post, result, rh);
 
    // 실패해도 갱신 — 오류 시 매 초 재시도하는 것을 막는다
    g_lastBalSend = TimeLocal();
@@ -256,41 +432,104 @@ void OnDeinit(const int reason)
    EventKillTimer();
    DeletePanel();
    DeleteBandObjects();
+
+   // 잔고 소진으로 스스로 종료한 경우에는 사유를 화면에 남긴다.
+   Comment(g_balanceHalt
+           ? "Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — EA 종료됨"
+           : "");
+
    Print("Bolinger_past deinitialized / reason=", reason);
 }
 
 void OnTimer()
 {
-   // 위험 고지 (최초 1회)
-   if(!g_riskShown)
-   {
-      g_riskAccepted = BPShowRiskPopup();
-      g_riskShown    = true;
-   }
+   if(g_balanceHalt) return;   // 청산·종료는 OnTick의 CheckBalanceStop이 전담한다
 
-   BPCheckLicense();
-   g_licInitDone = true;
+   // 틱이 유실되거나 OnTick이 굶는 구간에서도 최소 1초 해상도로 바스켓을 관리한다.
+   // MT4는 처리 중 도착한 틱을 큐잉하지 않고 버리므로, CheckSideBasket이 유일한
+   // 청산 장치인 이상 이중화가 필요하다.
+   CheckSideBasket(OP_BUY);
+   CheckSideBasket(OP_SELL);
+
+   MaintainLicense();
+
+   // 라이선스 확인 후에도 미동의 상태면 계속 시도한다. 포지션 보유 중에는 팝업이
+   // 보류되므로, 플랫이 되는 즉시 팝업이 뜨도록 매 초 확인한다.
+   if(g_licenseOK && !g_riskAccepted)
+      PromptRiskDisclosure();
 
    BPSendBalance();
+
+   // 정지 사유는 이 함수에서 바뀐다. 틱이 없는 구간에서도 패널이 갱신되도록 여기서도 그린다.
+   if(ShowPanel) DrawPanel();
+}
+
+//+------------------------------------------------------------------+
+//| 순자산/잔고 최소값 도달 → 이 EA의 포지션 청산 후 EA 종료          |
+//+------------------------------------------------------------------+
+void CheckBalanceStop()
+{
+   if(!g_balanceHalt)
+   {
+      if(MinEquityStop <= 0) return;
+      if(AccountEquity() > MinEquityStop && AccountBalance() > MinEquityStop) return;
+
+      g_balanceHalt = true;
+      g_running     = false;
+      Print(">>> Bolinger_past: 순자산/잔고 ", DoubleToString(MinEquityStop, 2),
+            " 이하 도달 — 전체 청산 후 EA 종료 / Equity=", DoubleToString(AccountEquity(), 2),
+            " / Balance=", DoubleToString(AccountBalance(), 2));
+   }
+
+   // halt 상태에서는 잔여 포지션이 없어질 때까지 매 틱 재시도한다.
+   // CloseSide는 IsTargetOrder()로 Symbol·MagicNumber를 필터하므로 다른 EA나
+   // 다른 심볼의 포지션은 건드리지 않는다.
+   if(CountSide(OP_BUY)  > 0) CloseSide(OP_BUY,  "MIN_EQUITY_STOP");
+   if(CountSide(OP_SELL) > 0) CloseSide(OP_SELL, "MIN_EQUITY_STOP");
+
+   // 청산이 끝나기 전에 EA를 제거하면 남은 포지션이 브로커측 TP/SL 없이 방치된다.
+   if(CountSide(OP_BUY) > 0 || CountSide(OP_SELL) > 0)
+   {
+      Comment("Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — 청산 재시도 중");
+      return;
+   }
+
+   Comment("Bolinger_past: 순자산/잔고 " + DoubleToString(MinEquityStop, 2) + " 이하 — EA 종료됨");
+   ExpertRemove();
+}
+
+//+------------------------------------------------------------------+
+//| 매매 허용 조건. 청산은 이 게이트와 무관하게 항상 실행된다.        |
+//+------------------------------------------------------------------+
+bool TradingAllowed()
+{
+   if(!g_running)      return false;
+   if(g_balanceHalt)   return false;
+   if(!g_licenseOK)    return false;
+   if(!g_riskAccepted) return false;
+   return true;
 }
 
 void OnTick()
 {
-   // 위험고지 미동의 또는 라이센스 미확인/미통과 시 매매 차단 (패널은 표시)
-   if(!g_licInitDone || !g_riskAccepted || !g_licenseOK)
+   CheckBalanceStop();
+   if(g_balanceHalt)
    {
       if(ShowPanel) DrawPanel();
       return;
    }
 
-   if(!g_running)
-   {
-      if(ShowPanel) DrawPanel();
-      return;
-   }
-
+   // 이 EA는 브로커측 TP/SL을 심지 않는다(OpenOrder의 sl=0, tp=0).
+   // CheckSideBasket이 유일한 청산 장치이므로 라이선스·동의 상태와 무관하게
+   // 항상 실행해야 보유 그리드가 방치되지 않는다.
    CheckSideBasket(OP_BUY);
    CheckSideBasket(OP_SELL);
+
+   if(!TradingAllowed())   // 신규 진입·추가 진입만 차단
+   {
+      if(ShowPanel) DrawPanel();
+      return;
+   }
 
    if(IsNewBar())
    {
@@ -501,6 +740,7 @@ bool OpenOrder(int orderType, double lots, string reason)
 void CloseSide(int orderType, string reason)
 {
    bool printedCloseLabel = false;
+   bool closedAny = false;
 
    for(int pass=0; pass<10; pass++)
    {
@@ -528,6 +768,7 @@ void CloseSide(int orderType, string reason)
          }
          else
          {
+            closedAny = true;
             Print("Closed / ticket=", ticket, " / reason=", reason,
                   " / lots=", DoubleToString(lots, 2),
                   " / profit=", DoubleToString(profit, 2));
@@ -549,8 +790,10 @@ void CloseSide(int orderType, string reason)
       Sleep(150);
    }
 
-   // 청산으로 잔고가 확정되었으므로 주기와 무관하게 즉시 전송
-   BPSendBalance(true);
+   // 실제로 청산된 것이 있을 때만 잔고가 확정된다. 무조건 보내면 CheckBalanceStop의
+   // 매 틱 재시도 루프에서 아무것도 닫지 못한 채 3초짜리 WebRequest가 반복돼,
+   // 정작 청산이 급한 순간에 재시도가 밀린다.
+   if(closedAny) BPSendBalance(true);
 }
 
 bool IsTargetOrder()
@@ -697,6 +940,22 @@ void SetupChart()
    ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrDodgerBlue);
 }
 
+//+------------------------------------------------------------------+
+//| 패널 STATUS 줄 — 정지 사유를 구분해 표시한다                      |
+//+------------------------------------------------------------------+
+string PanelStatusText()
+{
+   if(g_balanceHalt)              return("HALTED (MIN EQUITY)");
+   if(g_lastLicCheck == 0)        return("LICENSE 확인 중");
+   if(!g_licenseChecked)          return(g_licenseDenied ? "NO LICENSE" : "LICENSE 확인 실패 - 재시도 중");
+   if(!g_licenseOK)               return(g_licenseDenied ? "LICENSE 실효 - 청산됨" : "LICENSE 확인 불가 - 진입 차단");
+   if(g_licenseFailStreak > 0)    return("LICENSE 재확인 중 (유예)");
+   if(g_riskDeferred)             return("위험고지 대기 (청산만 관리)");
+   if(!g_riskAccepted)            return("위험고지 미동의");
+   if(!g_running)                 return("PAUSED");
+   return("RUNNING");
+}
+
 void DrawPanel()
 {
    int panelX = 8, panelY = 24, panelW = 390, panelH = 280, topH = 30;
@@ -726,9 +985,11 @@ void DrawPanel()
    int line = 0;
 
    SetPanelLine(line++, "Bolinger_past", clrWhite, 15);
-   SetPanelLine(line++, "LICENSE       : " + g_licStatusTxt, g_licenseOK ? clrLime : clrTomato, 9);
+   SetPanelLine(line++, "LICENSE       : " + g_licStatusTxt,
+                (g_licenseOK && g_licenseFailStreak == 0) ? clrLime : clrTomato, 9);
    SetPanelLine(line++, "SYMBOL / TF   : " + Symbol() + " / " + IntegerToString(Period()), clrWhite, 9);
-   SetPanelLine(line++, "STATUS        : " + (g_running ? "RUNNING" : "PAUSED"), g_running ? clrLime : clrTomato, 9);
+   string statusTxt = PanelStatusText();
+   SetPanelLine(line++, "STATUS        : " + statusTxt, statusTxt == "RUNNING" ? clrLime : clrTomato, 9);
    SetPanelLine(line++, "BB PERIOD/DEV : " + IntegerToString(BBperiod) + " / " + DoubleToString(BBdeviation, 2), clrGold, 9);
    SetPanelLine(line++, "UPPER ARMED   : " + (g_upperBreakoutArmed ? "READY" : "NO"), g_upperBreakoutArmed ? clrGold : clrSilver, 9);
    SetPanelLine(line++, "LOWER ARMED   : " + (g_lowerBreakoutArmed ? "READY" : "NO"), g_lowerBreakoutArmed ? clrDodgerBlue : clrSilver, 9);

@@ -3,3 +3,6 @@
 
 # JetBrains IDE
 .idea/
+
+# SDD 작업 스크래치
+.superpowers/
