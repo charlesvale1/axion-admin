@@ -288,7 +288,12 @@ void MaintainLicense()
 
       // 동의 기록의 접근 시각을 주기적으로 갱신한다. 갱신이 부착 시점에만 일어나면
       // 4주 넘게 무중단 가동할 때 MT4가 변수를 삭제해, 다음 재부착에서 모달이 뜬다.
-      if(g_riskAccepted) GlobalVariableSet(RiskConsentKey(), 1);
+      // 이미 존재하는 동의 기록의 접근 시각만 갱신한다. GlobalVariableCheck 없이
+      // 쓰면 ShowKoreanRiskPopup=false로 돌린 계좌(동의 절차를 거치지 않아
+      // g_riskAccepted만 true인 상태)에 동의 기록이 새로 생겨, 나중에 팝업을
+      // 다시 켜도 고지가 표시되지 않는다.
+      if(g_riskAccepted && GlobalVariableCheck(RiskConsentKey()))
+         GlobalVariableSet(RiskConsentKey(), 1);
       return;
    }
 
