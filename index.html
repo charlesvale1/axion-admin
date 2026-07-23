@@ -2191,7 +2191,12 @@ async function addPartner() {
   if (!team || !email) { await showAlert('팀 이름과 이메일을 입력해주세요.', '⚠️'); return; }
   if (!pw || pw.length < 8) { await showAlert('비밀번호는 8자 이상이어야 합니다.', '⚠️'); return; }
 
-  const { error: authErr } = await sb.auth.signUp({ email, password: pw });
+  // 주의: sb.auth.signUp()을 쓰면 관리자 세션이 신규 파트너 세션으로 교체되어
+  // 이어지는 partners INSERT가 RLS에 걸림 → 세션을 저장하지 않는 임시 클라이언트로 생성
+  const tempAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+  const { error: authErr } = await tempAuth.auth.signUp({ email, password: pw });
   if (authErr && !authErr.message.includes('already registered')) {
     await showAlert('계정 생성 중 오류가 발생했습니다.\n' + authErr.message, '❌'); return;
   }

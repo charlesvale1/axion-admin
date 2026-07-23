@@ -44,7 +44,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION axion_is_super()
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT auth.email() = 'admin@axion.com';
+  -- index.html의 SUPER_ADMIN_EMAILS 목록과 반드시 일치시킬 것
+  SELECT auth.email() IN ('admin@axion.com', 'ehddn5257@gmail.com');
 $$;
 
 
